@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.cache/
+.venv/
+.env
+
+# VS Code
+.vscode/
+
+# Coverage / test
+.coverage
+htmlcov/
+
+# Build
+dist/
+build/
+
+# Local data
+var/
+data/
+
+# Docker
+*.log

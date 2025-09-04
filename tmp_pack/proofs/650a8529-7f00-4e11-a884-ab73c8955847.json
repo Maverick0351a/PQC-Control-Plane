@@ -1,0 +1,26 @@
+{
+  "receipt_id": "650a8529-7f00-4e11-a884-ab73c8955847",
+  "leaf_hash_b64": "SGgH+zFZBvqHu+7L6PSHsraOl58TYOoIGkB8l90Dwf8=",
+  "path": [
+    [
+      "R",
+      "LJpnaTul59eTy4U4AxXzLlGSap+D6jdihyRupp31944="
+    ],
+    [
+      "R",
+      "XCG37IC6oemdwI6ZpFJrZJ1TLxKUUVeq/NB47bENItk="
+    ],
+    [
+      "R",
+      "TRsMtHg8j4CCsCTbga7v51Ebftc+Qd9FvUgtXdENnBc="
+    ],
+    [
+      "R",
+      "unxGkV4jsuSGDJ5UOclRalVeQOBb+o7QyHLemskcMmE="
+    ],
+    [
+      "L",
+      "brJlgDHA7ss+XH3xb70+wkJnMm8ApzwBGmBVKk38RRg="
+    ]
+  ]
+}

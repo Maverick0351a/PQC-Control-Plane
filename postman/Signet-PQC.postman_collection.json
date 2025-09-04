@@ -1,0 +1,61 @@
+{
+  "info": {
+    "name": "Signet PQC Control Plane MVP",
+    "_postman_id": "9a1c1c3f-0000-0000-0000-000000000000",
+    "description": "PCH-Lite challenge/response demo + Compliance Pack builder",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1) Trigger PCH Challenge (GET /protected)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/protected",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["protected"]
+        }
+      }
+    },
+    {
+      "name": "2) Send Signed Request (POST /protected)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"PCH-Challenge","value":":<paste challenge>:"},
+          {"key":"PCH-Channel-Binding","value":"tls-session-id=:<base64(session_id)>:"},
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Content-Digest","value":"sha-256=:<b64(sha256(body))>:"},
+          {"key":"Signature-Input","value":"pch=(\"@method\" \"@path\" \"@authority\" \"content-digest\" \"pch-challenge\" \"pch-channel-binding\");created=<epoch>;keyid=\"caller-1\";alg=\"ed25519\""},
+          {"key":"Signature","value":"pch=:<b64(sig over base)>:"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"demo\":true}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/protected",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["protected"]
+        }
+      }
+    },
+    {
+      "name": "3) Build Compliance Pack (POST /compliance/pack)",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {"mode":"raw","raw":"{\"date\": \"{{today}}\"}"},
+        "url": {"raw":"http://localhost:8080/compliance/pack","protocol":"http","host":["localhost"],"port":"8080","path":["compliance","pack"]}
+      }
+    }
+  ],
+  "variable": [
+    {"key":"today","value":"2025-01-05"}
+  ]
+}

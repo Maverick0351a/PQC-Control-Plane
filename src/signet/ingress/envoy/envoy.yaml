@@ -1,0 +1,4 @@
+static_resources:
+  listeners: []
+  clusters: []
+# Placeholder; implement transport socket & HTTP filter when adding tls-exporter binding.

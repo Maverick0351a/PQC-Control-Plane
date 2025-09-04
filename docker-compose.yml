@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    image: signet-pqc-mvp:latest
+    environment:
+      - FEATURE_PCH=${FEATURE_PCH:-true}
+      - PCH_ADVISORY=${PCH_ADVISORY:-true}
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/app/var/data
+      - SERVER_SIGNING_KEY=/app/keys/sth_ed25519_sk.pem
+      - CLIENT_KEYS=/app/config/clients.json
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - app
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./src/signet/ingress/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Dev self-signed certs (generated via scripts/gen_dev_tls.ps1)
+      - ./src/signet/ingress/certs:/etc/nginx/certs:ro
