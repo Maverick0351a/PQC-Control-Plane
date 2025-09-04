@@ -1,0 +1,10 @@
+__pycache__/ 
+*.pyc
+.env
+.venv/
+var/data/
+tmp_pack/
+uvicorn.out
+uvicorn.err
+keys/*_sk.pem
+*.zip
