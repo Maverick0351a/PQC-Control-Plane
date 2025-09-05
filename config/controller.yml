@@ -21,3 +21,17 @@ binding:
 guard:
   enforce_routes:
     - /protected
+
+dpcp:
+  enabled: false                # shadow mode (collect only)
+  hash:
+    algorithm: sha384
+    pepper_secret_ref: "dpcp/pepper"
+    max_bytes_hashed: 0         # 0 = no limit (streaming)
+  exporter_binding:
+    enabled: true
+    type: tls-exporter-ekm-hmac-v1
+  sink_url: http://dpcp-sink:8080/ingest
+  privacy:
+    redact_identities: true
+    asn_granularity: asn

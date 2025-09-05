@@ -34,6 +34,7 @@ class ControllerConfig:
     availability_floor: float = _DEFAULT["availability_floor"]
     header_budget_max: int = _DEFAULT["header_budget_max"]
     slo_latency_ms: int = _DEFAULT["slo_latency_ms"]
+    dpcp: dict | None = None  # raw dpcp shadow-mode config (parsed separately)
 
     def __post_init__(self):
         if self.weights is None:
@@ -105,6 +106,8 @@ def load_config() -> ControllerConfig:
                 weights[k] = cast(os.environ[env])
             except Exception:
                 pass
+    # Extract optional dpcp block (kept simple; deeper validation deferred)
+    dpcp_block = data.get("dpcp") if isinstance(data.get("dpcp"), dict) else None
     cfg = ControllerConfig(
         trip_open=float(data.get("trip_open", _DEFAULT["trip_open"])),
         close_successes=int(data.get("close_successes", _DEFAULT["close_successes"])),
@@ -114,6 +117,7 @@ def load_config() -> ControllerConfig:
         availability_floor=float(data.get("availability_floor", _DEFAULT["availability_floor"])),
         header_budget_max=int(data.get("header_budget_max", _DEFAULT["header_budget_max"])),
         slo_latency_ms=int(data.get("slo_latency_ms", _DEFAULT["slo_latency_ms"])),
+        dpcp=dpcp_block,
     )
     _CONFIG = cfg
     return cfg
