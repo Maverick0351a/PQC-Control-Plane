@@ -1,0 +1,23 @@
+﻿{
+    "_type":  "https://in-toto.io/Statement/v0.1",
+    "subject":  [
+                    {
+                        "digest":  {
+                                       "sha256":  "29573BC4B5C5DB6A4583AAB20BF9086387AFE692B3B87B4BFF4A15417590FDE8"
+                                   },
+                        "name":  "signet-pqc:test"
+                    }
+                ],
+    "predicateType":  "https://slsa.dev/provenance/v0.2",
+    "predicate":  {
+                      "invocation":  {
+                                         "configSource":  {
+                                                              "uri":  "./Dockerfile"
+                                                          }
+                                     },
+                      "buildType":  "dockerfile",
+                      "builder":  {
+                                      "id":  "local-dev"
+                                  }
+                  }
+}

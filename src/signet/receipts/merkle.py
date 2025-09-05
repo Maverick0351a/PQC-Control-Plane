@@ -1,37 +1,39 @@
+import base64
 import hashlib
-from typing import List
 
-def merkle_root(leaves: List[bytes]) -> bytes:
+def merkle_root(leaves: list[bytes]) -> bytes:
     if not leaves:
         return b"\x00" * 32
-    layer = leaves
-    while len(layer) > 1:
-        nxt = []
-        for i in range(0, len(layer), 2):
-            left = layer[i]
-            right = layer[i+1] if i+1 < len(layer) else left
-            nxt.append(hashlib.sha256(left + right).digest())
-        layer = nxt
-    return layer[0]
+    nodes = [hashlib.sha256(leaf).digest() for leaf in leaves]
+    while len(nodes) > 1:
+        next_level = []
+        for i in range(0, len(nodes), 2):
+            left = nodes[i]
+            right = nodes[i+1] if i+1 < len(nodes) else nodes[i]
+            next_level.append(hashlib.sha256(left + right).digest())
+        nodes = next_level
+    return nodes[0]
 
-def merkle_proof(leaves: List[bytes], index: int):
-    path = []
+def merkle_proof(leaves: list[bytes], index: int) -> list[tuple[str, str]]:
+    # returns list of (dir, hash_b64)
     if index < 0 or index >= len(leaves):
-        return path
-    layer = leaves
+        return []
+    nodes = [hashlib.sha256(leaf).digest() for leaf in leaves]
+    proof = []
     idx = index
-    while len(layer) > 1:
-        nxt = []
-        for i in range(0, len(layer), 2):
-            left = layer[i]
-            right = layer[i+1] if i+1 < len(layer) else left
-            if i == idx or i+1 == idx:
-                if idx == i:
-                    path.append(("R", (right)))
+    level = nodes
+    while len(level) > 1:
+        next_level = []
+        for i in range(0, len(level), 2):
+            left = level[i]
+            right = level[i+1] if i+1 < len(level) else level[i]
+            if i == idx - (idx % 2):
+                if idx % 2 == 0:
+                    # right sibling
+                    proof.append(("R", base64.b64encode(right).decode()))
                 else:
-                    path.append(("L", (left)))
-            nxt.append(hashlib.sha256(left + right).digest())
-        layer = nxt
-        idx //= 2
-    import base64
-    return [(d, base64.b64encode(sib).decode()) for d, sib in path]
+                    proof.append(("L", base64.b64encode(left).decode()))
+            next_level.append(hashlib.sha256(left + right).digest())
+        idx = idx // 2
+        level = next_level
+    return proof

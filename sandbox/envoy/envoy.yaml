@@ -1,0 +1,68 @@
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 8443 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: app
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app }
+          http_filters:
+          # Optional DPR signer WASM filter (insert before Lua + router). Provide compiled module at /etc/envoy/wasm/dpr_signer.wasm
+          - name: envoy.filters.http.wasm
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+              config:
+                name: dpr_signer
+                vm_config:
+                  runtime: "envoy.wasm.runtime.v8"
+                  code: { local: { filename: "/etc/envoy/wasm/dpr_signer.wasm" } }
+                configuration:
+                  @type: type.googleapis.com/google.protobuf.StringValue
+                  value: |
+                    {"key_id":"demo-ed25519","ed25519_secret_b64":"","emit_record_header":false}
+          # Native TLS exporter injector filter (prototype) - requires custom Envoy build with extension registered.
+          # Optionally fall back to Lua pseudo exporter if NATIVE_EXPORTER=0 (envsubst or manual edit required at deploy time)
+          - name: envoy.filters.http.tls_exporter_injector
+            typed_config:
+              "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+              type_url: envoy.tls_exporter.v3.TlsExporterInjector
+              value:
+                context: EXPORTER-Channel-Binding
+                out_header: x-tls-exporter
+                length: 32
+          - name: envoy.filters.http.router
+            typed_config: {}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+        common_tls_context:
+          tls_certificates:
+          - certificate_chain: { filename: "/etc/envoy/server.crt" }
+            private_key: { filename: "/etc/envoy/server.key" }
+  clusters:
+  - name: app
+    connect_timeout: 0.25s
+    type: logical_dns
+    lb_policy: round_robin
+    load_assignment:
+      cluster_name: app
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: app, port_value: 8080 }
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }

@@ -2,22 +2,28 @@ import base64
 import time
 import re
 from typing import Dict, Tuple, List
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
+from .alg_registry import verify_alg
 from ..config import CLIENT_KEYS
+from ..pch.base_string import build_canonical_base
 import json
 import os
 
 COMPONENT_RE = re.compile(r'\s*([@a-zA-Z0-9\-]+)\s*')
 
 def parse_signature_input(header: str) -> Tuple[str, List[str], Dict[str, str]]:
+    # Example: pch=("@method" "@path" "content-digest");created=...;keyid="caller-1";alg="ed25519"
+    # Return label ('pch'), components list, params dict
     label, rest = header.split("=", 1)
     if not rest.startswith("("):
         raise ValueError("invalid Signature-Input")
     items, params = rest.split(")", 1)
     items = items[1:].strip()
+    # Extract components between quotes – items looks like: "@method" "@path" "content-digest"
     raw_parts = [p.strip() for p in items.split('"')]
     comps = [p for p in raw_parts if p and not p.isspace()]
+    # parse params
     params = params.strip().lstrip(";")
     p = {}
     for part in params.split(";"):
@@ -31,40 +37,11 @@ def parse_signature_input(header: str) -> Tuple[str, List[str], Dict[str, str]]:
     return label, comps, p
 
 def build_signature_base(request, components: List[str], params: Dict[str, str], evidence_sha256_hex: str) -> str:
-    lines = []
-    headers = {k.lower(): v for k, v in request.headers.items()}
-    for comp in components:
-        lc = comp.lower()
-        if lc == "@method":
-            val = request.method.upper()
-        elif lc == "@path":
-            path = request.url.path or "/"
-            query = request.url.query
-            val = path if not query else f"{path}?{query}"
-        elif lc == "@authority":
-            val = request.headers.get("host") or request.url.netloc or ""
-        elif lc == "content-digest":
-            val = headers.get("content-digest", "")
-        elif lc == "content-type":
-            val = headers.get("content-type", "")
-        elif lc == "pch-challenge":
-            val = headers.get("pch-challenge", "")
-        elif lc == "pch-channel-binding":
-            val = headers.get("pch-channel-binding", "")
-        elif lc == "evidence-sha-256":
-            val = evidence_sha256_hex
-        else:
-            val = headers.get(lc, "")
-        lines.append(f"{lc}: {val}")
-    comp_list = " ".join([f'\"{c}\"' for c in components])
-    created = params.get("created") or str(int(time.time()))
-    keyid = params.get("keyid", "")
-    alg = params.get("alg", "ed25519")
-    sig_params = (
-        f"@signature-params: ({comp_list});created={created};keyid=\"{keyid}\";alg=\"{alg}\""
-    )
-    lines.append(sig_params)
-    return "\n".join(lines)
+    """Backward compatible wrapper that now delegates to canonical builder.
+
+    Centralization happens in pch.base_string.build_canonical_base.
+    """
+    return build_canonical_base(request, components, params, evidence_sha256_hex)
 
 def load_client_keys() -> Dict[str, Dict[str, str]]:
     if not os.path.exists(CLIENT_KEYS):
@@ -73,32 +50,21 @@ def load_client_keys() -> Dict[str, Dict[str, str]]:
         return json.load(f)
 
 def verify_signature(alg: str, keyid: str, signature_b64: str, message: str) -> bool:
+    """Backward-compatible verification entrypoint.
+
+    Delegates to alg_registry for all algorithms (including legacy ed25519).
+    """
     keys = load_client_keys()
     entry = keys.get(keyid)
     if not entry:
         return False
+    # Allow hybrid client entries to advertise 'ecdsa-p256+ml-dsa-65'
     if entry.get("alg") != alg:
         return False
-    if alg.lower() == "ed25519":
-        pub_pem = entry.get("public_key_pem")
-        pub_b64 = entry.get("public_key_b64")
-        if pub_pem:
-            pub = Ed25519PublicKey.from_public_bytes(
-                serialization.load_pem_public_key(pub_pem.encode()).public_bytes(
-                    encoding=serialization.Encoding.Raw,
-                    format=serialization.PublicFormat.Raw
-                )
-            )
-        elif pub_b64:
-            pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64))
-        else:
-            return False
-        try:
-            pub.verify(base64.b64decode(signature_b64), message.encode())
-            return True
-        except Exception:
-            return False
-    return False
+    try:
+        return verify_alg(alg, entry, signature_b64, message)
+    except Exception:  # pragma: no cover - defensive
+        return False
 
 def sign_ed25519(private_pem: str, message: str) -> str:
     priv = serialization.load_pem_private_key(private_pem.encode(), password=None)

@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\redis\_parsers\base.py
+# hypothesis_version: 6.138.2
+
+[b'\r\n', b'invalidate', 'ASK', 'Buffer is closed.', 'CLUSTERDOWN', 'CROSSSLOT', 'ERR', 'EXECABORT', 'LOADING', 'MASTERDOWN', 'MOVED', 'NOAUTH', 'NOPERM', 'NOSCRIPT', 'OOM', 'READONLY', 'TRYAGAIN', 'WRONGPASS', '_buffer', '_chunks', '_pos', '_read_size', '_stream', 'encoder', 'invalid password', 'invalidate']

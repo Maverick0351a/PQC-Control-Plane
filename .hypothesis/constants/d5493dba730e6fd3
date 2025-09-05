@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\app.py
+# hypothesis_version: 6.138.14
+
+[0.5, 400, 404, '*', '/__health', '/__metrics', '/cbom.json', '/compliance/pack', '/echo/headers', '/metrics', '/protected', 'U', 'allow', 'alpha', 'anomalies', 'beta', 'breaker', 'close_successes', 'date', 'deadband', 'err_ewma', 'error', 'failure_rate', 'failure_reason', 'gamma', 'headers', 'host', 'id', 'kingman_wq_ms', 'monitor', 'no_pch', 'ok', 'open', 'pack', 'pch', 'pch-challenge', 'pch-channel-binding', 'pch_result', 'policy_ok', 'pqc_rate', 'present', 'receipt not found', 'receipt_id', 'rho', 'route', 'routes', 'slo_headroom', 'state', 'status', 'user-agent', 'verified', 'x-forwarded-host', 'x-forwarded-port', 'x-forwarded-proto', 'x-tls-exporter', 'x-tls-session-id']

@@ -1,0 +1,7 @@
+{
+  "name": "timeout_up",
+  "type": "timeout",
+  "stream": "upstream",
+  "toxicity": 1.0,
+  "attributes": { "timeout": 2000 }
+}

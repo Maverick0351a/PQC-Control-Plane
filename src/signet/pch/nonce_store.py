@@ -1,31 +1,21 @@
-import time
-import threading
-from typing import Tuple, Dict
+import redis
+import base64
+import os
+from ..config import REDIS_URL
 
 class NonceStore:
-    def __init__(self, ttl_seconds: int = 30):
-        self.ttl = ttl_seconds
-        self.lock = threading.Lock()
-        self.store: Dict[Tuple[str,str,str,str], float] = {}
+    def __init__(self):
+        self.r = redis.from_url(REDIS_URL, decode_responses=True)
 
-    def _key(self, route: str, client_ip: str, tls_id: str, nonce: str):
-        return (route, client_ip, tls_id, nonce)
-
-    def issue(self, route: str, client_ip: str, tls_id: str) -> str:
-        nonce = __import__("base64").urlsafe_b64encode(__import__("os").urandom(24)).decode().rstrip("=")
-        with self.lock:
-            self.store[self._key(route, client_ip, tls_id, nonce)] = time.time() + self.ttl
+    def issue(self, route: str, client_ip: str, tls_id: str, ttl: int = 300) -> str:
+        nonce = base64.b64encode(os.urandom(32)).decode()
+        key = f"pch:{route}:{client_ip}:{tls_id}:{nonce}"
+        self.r.set(key, "1", ex=ttl, nx=True)
         return nonce
 
     def consume(self, route: str, client_ip: str, tls_id: str, nonce: str) -> bool:
-        k = self._key(route, client_ip, tls_id, nonce)
-        now = time.time()
-        with self.lock:
-            exp = self.store.get(k)
-            if not exp:
-                return False
-            if exp < now:
-                del self.store[k]
-                return False
-            del self.store[k]
-            return True
+        key = f"pch:{route}:{client_ip}:{tls_id}:{nonce}"
+        with self.r.pipeline() as p:
+            p.delete(key)
+            deleted, = p.execute()
+        return deleted == 1

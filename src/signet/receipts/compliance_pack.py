@@ -15,6 +15,7 @@ def build_compliance_pack(date_str: str) -> str:
             z.write(receipts_path, arcname="receipts.jsonl")
         for f in os.listdir(proofs_dir):
             z.write(os.path.join(proofs_dir, f), arcname=f"proofs/{f}")
+        # Include a simple verifier
         z.writestr("verify_cli.py", VERIFY_CLI_CODE)
         z.writestr("README.md", PACK_README)
     return pack_path
@@ -23,16 +24,20 @@ VERIFY_CLI_CODE = """
 import json, sys, base64, hashlib
 
 def verify(sth_path, receipts_path, proofs_dir):
+    # load sth
     with open(sth_path, "r", encoding="utf-8") as f:
         sth = json.load(f)
     root = base64.b64decode(sth["root_hash_b64"])
+    # load receipts
     recs = []
     with open(receipts_path, "r", encoding="utf-8") as f:
         for line in f:
             recs.append(json.loads(line))
+    # map id->index, leaf
     id2leaf = {r["id"]: base64.b64decode(r["leaf_hash_b64"]) for r in recs}
     ok = True
     for rid, leaf in id2leaf.items():
+        # recompute root via proof
         with open(f"{proofs_dir}/{rid}.json","r",encoding="utf-8") as pf:
             proof = json.load(pf)["path"]
         h = hashlib.sha256(leaf).digest()
@@ -58,8 +63,10 @@ Compliance Pack
 ===============
 
 Contents:
-- sth.json — Signed Tree Head
+- sth.json — Signed Tree Head (unsigned verification of root; signature verification requires distributing the server public key separately)
 - receipts.jsonl — newline-delimited enforcement receipts
 - proofs/*.json — Merkle inclusion proofs for each receipt
 - verify_cli.py — offline inclusion verifier (usage: `python verify_cli.py sth.json receipts.jsonl proofs`)
+
+This pack allows an auditor to validate that each receipt is included in the committed Merkle tree root.
 """

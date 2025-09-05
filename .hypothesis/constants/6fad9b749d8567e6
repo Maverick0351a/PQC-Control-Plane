@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\receipts\store.py
+# hypothesis_version: 6.138.14
+
+['"', 'DATA_DIR', 'a', 'action', 'breaker_state', 'content-digest', 'deadband', 'digest', 'err_ewma', 'keyid', 'keyid=', 'kingman_wq_ms', 'leaf_hash_b64', 'method', 'path', 'r', 'reason', 'receipts.jsonl', 'rho', 'signature-input', 'utf-8', 'utility']

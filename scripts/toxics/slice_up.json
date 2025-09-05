@@ -1,0 +1,7 @@
+{
+  "name": "slice_up",
+  "type": "slicer",
+  "stream": "upstream",
+  "toxicity": 1.0,
+  "attributes": { "average_size": 64, "size_variation": 32, "delay": 5 }
+}

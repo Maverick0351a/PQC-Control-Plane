@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\crypto\alg_registry.py
+# hypothesis_version: 6.138.14
+
+['Dilithium3', 'PQCUnavailable', 'alg', 'ecdsa-p256', 'ecdsa-p256+ml-dsa-65', 'ecdsa_p256_pem', 'ed25519', 'get_public_material', 'ml-dsa-65', 'ml_dsa_65_pk_b64', 'public_key_b64', 'public_key_pem', 'sigs', 'verify_alg']

@@ -1,0 +1,16 @@
+Subject: 5‑Day Pilot: Closed‑Loop PQC Enforcement & Verifiable Receipts
+
+Hi <Name>,
+
+We’re helping security teams prove enforcement, not just configure it. Signet gives you:
+
+• Closed‑loop: Policy → Enforcement → Proof (Merkle‑linked receipts)  
+• Stability: Control‑theoretic breaker (no brownout flapping)  
+• Safety: Rego policy + TLS exporter binding  
+
+Pilot = 5 business days:
+Day 1 handshake, Day 3 breaker under stress, Day 5 compliance pack verification.
+
+If you can spare 30 minutes this week, I’ll run the live demo (one PowerShell script). Interested?
+
+– <Your Name>

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "signet.fullname" . }}
+  labels:
+    app: {{ include "signet.name" . }}
+    chart: {{ include "signet.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: Helm
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "signet.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "signet.fullname" . }}
+    spec:
+      containers:
+        - name: signet
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- range $k, $v in .Values.env }}
+            - name: {{ $k }}
+              value: "{{ $v }}"
+            {{- end }}
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: controller-config
+              mountPath: /app/config/controller.yml
+              subPath: controller.yml
+            - name: rego-policy
+              mountPath: /app/policy/shield.rego
+              subPath: shield.rego
+      volumes:
+        - name: controller-config
+          configMap:
+            name: {{ include "signet.fullname" . }}-controller
+        - name: rego-policy
+          configMap:
+            name: {{ include "signet.fullname" . }}-policy

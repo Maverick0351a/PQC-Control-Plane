@@ -1,0 +1,37 @@
+weights:
+  alpha: 0.45   # PQC_rate weight
+  beta: 0.35    # (1 - failure_rate) weight
+  gamma: 0.20   # SLO headroom weight
+thresholds:
+  trip_open: 0.25          # EWMA error rate to trip Open
+  close_successes: 10      # N_C to close from HalfOpen
+  cooldown_sec: 20
+slo:
+  target_p50_ms: 100
+  target_p95_ms: 300
+header_budget:
+  max_total_bytes: 12000
+  max_single_header_bytes: 8000
+  max_signature_bytes: 5000
+safety:
+  availability_floor_5xx_ewma: 0.05
+  require_tls_exporter: true
+binding:
+  type: tls-session-id   # will switch to tls-exporter after Envoy step
+guard:
+  enforce_routes:
+    - /protected
+
+dpcp:
+  enabled: false                # shadow mode (collect only)
+  hash:
+    algorithm: sha384
+    pepper_secret_ref: "dpcp/pepper"
+    max_bytes_hashed: 0         # 0 = no limit (streaming)
+  exporter_binding:
+    enabled: true
+    type: tls-exporter-ekm-hmac-v1
+  sink_url: http://dpcp-sink:8080/ingest
+  privacy:
+    redact_identities: true
+    asn_granularity: asn

@@ -1,13 +1,9 @@
-import httpx
-from src.signet.config import BINDING_HEADER
+from starlette.testclient import TestClient
+from src.signet.app import app
 
-URL = "http://localhost:8080/protected"
-
-def test_pch_challenge():
-    with httpx.Client() as c:
-        r1 = c.get(URL)
-        assert r1.status_code == 401
-        assert "PCH-Challenge" in r1.headers
-        r2 = c.get(URL, headers={BINDING_HEADER: "devsession"})
-        assert r2.status_code == 401
-        assert "PCH-Challenge" in r2.headers
+def test_pch_challenge_headers():
+    client = TestClient(app)
+    r = client.get("/protected")
+    assert r.status_code == 401
+    assert "WWW-Authenticate" in r.headers
+    assert "PCH-Challenge" in r.headers

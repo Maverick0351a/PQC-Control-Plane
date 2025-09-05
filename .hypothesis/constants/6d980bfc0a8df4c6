@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\controller\state.py
+# hypothesis_version: 6.138.14
+
+[0.0, 'Closed', 'err_ewma', 'in_flight_probe', 'kingman_wq_ms', 'last_transition_ts', 'lat_ewma', 'name', 'rho_est']

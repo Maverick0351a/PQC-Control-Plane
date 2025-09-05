@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\controller\plan.py
+# hypothesis_version: 6.138.14
+
+[0.0, 0.2, 0.5, 0.99, 1.0, 5.0, 50.0, 8192, 'ATTEMPT_PQC', 'Closed', 'FALLBACK_CLASSIC', 'HalfOpen', 'Open', 'PROBE_HALF_OPEN', 'RELAX_HEADER_BUDGET', 'THROTTLE_PCH', 'action', 'allow_probe', 'alpha', 'beta', 'close_successes', 'deadband', 'enter_half_open', 'err_ewma', 'ewma_5xx', 'ewma_error_rate', 'ewma_latency_ms', 'failure_rate', 'fallback_pqc_rate', 'gamma', 'header_431_spike', 'header_budget_total', 'header_total_bytes', 'kingman_wq_ms', 'normal', 'open', 'open_cooldown', 'pqc_rate', 'probe_in_flight', 'reason', 'rho', 'rho_estimate', 'safety_availability', 'safety_both_violated', 'safety_header_budget', 'slo_headroom', 'state', 'trip_open', 'u_attempt', 'u_fallback', 'utility', 'utility_attempt', 'utility_fallback']

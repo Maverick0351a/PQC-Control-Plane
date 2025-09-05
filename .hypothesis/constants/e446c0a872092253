@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\utils\breaker_metrics.py
+# hypothesis_version: 6.138.14
+
+[0.0, 0.2, 0.5, 1.0, 300, 900, 1000, 'closed', 'error_rate_long', 'error_rate_med', 'error_rate_short', 'latency_avg_long_ms', 'latency_avg_med_ms', 'latency_avg_short_ms', 'open-advisory', 'state', 'total_errors', 'total_requests']

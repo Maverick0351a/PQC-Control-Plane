@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\receipts\transparency.py
+# hypothesis_version: 6.138.14
+
+['+00:00', 'Z', 'alg', 'date', 'ed25519', 'id', 'leaf_hash_b64', 'path', 'proofs', 'r', 'rb', 'receipt_id', 'receipts.jsonl', 'root_hash_b64', 'sth.json', 'sth_sig_b64', 'time', 'tree_size', 'utf-8', 'w']

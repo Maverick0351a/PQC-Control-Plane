@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pytest_metadata\ci\bitbucket.py
+# hypothesis_version: 6.138.2
+
+['BITBUCKET_BOOKMARK', 'BITBUCKET_BRANCH', 'BITBUCKET_CLONE_DIR', 'BITBUCKET_COMMIT', 'BITBUCKET_REPO_OWNER', 'BITBUCKET_REPO_SLUG', 'BITBUCKET_REPO_UUID', 'BITBUCKET_TAG', 'CI']

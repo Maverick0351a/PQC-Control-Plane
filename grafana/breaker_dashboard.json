@@ -1,0 +1,51 @@
+{
+  "title": "Signet Breaker Advisory",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "State",
+      "id": 1,
+      "datasource": "JSON",
+      "targets": [ { "url": "/__metrics", "path": "breaker.state" } ],
+      "options": { "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Short Error Rate (60s avg)",
+      "id": 2,
+      "datasource": "JSON",
+      "targets": [ { "url": "/__metrics", "path": "breaker.error_rate_short" } ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency Averages (ms)",
+      "id": 3,
+      "datasource": "JSON",
+      "targets": [
+        { "url": "/__metrics", "path": "breaker.latency_avg_short_ms" },
+        { "url": "/__metrics", "path": "breaker.latency_avg_med_ms" },
+        { "url": "/__metrics", "path": "breaker.latency_avg_long_ms" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "type": "stat",
+      "title": "Total Requests",
+      "id": 4,
+      "datasource": "JSON",
+      "targets": [ { "url": "/__metrics", "path": "breaker.total_requests" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Errors",
+      "id": 5,
+      "datasource": "JSON",
+      "targets": [ { "url": "/__metrics", "path": "breaker.total_errors" } ]
+    }
+  ]
+}

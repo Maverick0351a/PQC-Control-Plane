@@ -1,0 +1,7 @@
+{
+  "name": "bw_down",
+  "type": "bandwidth",
+  "stream": "downstream",
+  "toxicity": 1.0,
+  "attributes": { "rate": 256 }
+}

@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\h11\_state.py
+# hypothesis_version: 6.138.2
+
+['CLIENT', 'CLOSED', 'DONE', 'ERROR', 'IDLE', 'MUST_CLOSE', 'SEND_BODY', 'SEND_RESPONSE', 'SERVER', 'SWITCHED_PROTOCOL']

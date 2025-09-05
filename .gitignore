@@ -1,10 +1,45 @@
-__pycache__/ 
+# Python
+__pycache__/
 *.pyc
-.env
+*.pyo
+*.pyd
+*.egg-info/
+.cache/
 .venv/
-var/data/
-tmp_pack/
+.env
+
+# VS Code
+.vscode/
+
+# Coverage / test
+.coverage
+htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# Generated test artifacts
+*.sqlite3
+*.db
+
+# Local sandbox certs
+sandbox/envoy/certs/*
+
+# Build
+dist/
+build/
+
+# Local data
+var/
+data/
+
+# Docker
+*.log
+
+# Dev TLS certs (do not commit)
+src/signet/ingress/certs/*
+
+# Runtime logs
 uvicorn.out
 uvicorn.err
-keys/*_sk.pem
-*.zip
+
+# Platform normalization (recommend adding .gitattributes with text=auto)

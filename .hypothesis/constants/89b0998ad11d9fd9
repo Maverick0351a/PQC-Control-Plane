@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\cbom\export.py
+# hypothesis_version: 6.138.14
+
+['+00:00', '1.5', 'CycloneDX', 'Z', 'bindingType', 'bomFormat', 'client_key_ids', 'components', 'crypto-algorithm', 'data-structure', 'ed25519', 'enforceRoutes', 'hash', 'keys', 'libcrypto', 'merkle-tree', 'metadata', 'name', 'openssl_version_text', 'oqs', 'oqs_present', 'r', 'server_signing_key', 'sha-256', 'specVersion', 'timestamp', 'type', 'unknown', 'utf-8', 'version']
