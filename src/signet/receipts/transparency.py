@@ -26,7 +26,7 @@ def build_sth_for_date(date: str) -> str:
         "date": date,
         "tree_size": len(leaves),
         "root_hash_b64": base64.b64encode(root).decode(),
-        "time": datetime.datetime.utcnow().isoformat() + "Z",
+    "time": datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),
         "alg": "ed25519"
     }
     priv = _load_privkey(SERVER_SIGNING_KEY)

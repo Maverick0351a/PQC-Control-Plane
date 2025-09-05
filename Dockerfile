@@ -15,9 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
 COPY tools ./tools
-COPY config ./config
-COPY keys ./keys
-COPY .env ./.env
+# Do NOT bake keys or dynamic client config into the image; they will be mounted at runtime.
+# COPY config ./config
+# COPY keys ./keys
+# COPY .env ./.env
 
 RUN mkdir -p var/data && chown -R appuser:appuser /app
 USER appuser

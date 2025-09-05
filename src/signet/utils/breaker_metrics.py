@@ -22,14 +22,16 @@ class SlidingStat:
 
     def avg(self) -> float:
         with self._lock:
-            now = time.time(); self._trim(now)
+            now = time.time()
+            self._trim(now)
             if not self.points:
                 return 0.0
             return sum(v for _, v in self.points) / len(self.points)
 
     def count(self) -> int:
         with self._lock:
-            now = time.time(); self._trim(now)
+            now = time.time()
+            self._trim(now)
             return len(self.points)
 
 class BreakerMetrics:

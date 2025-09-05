@@ -47,11 +47,8 @@ def build_signature_base(request, components: List[str], params: Dict[str, str],
             query = request.url.query
             val = path if not query else f"{path}?{query}"
         elif lc == "@authority":
-            host = request.headers.get("host") or request.url.netloc or ""
-            # Dev canonicalization: drop :8443 so client can sign stable authority
-            if host.endswith(":8443"):
-                host = host.rsplit(":", 1)[0]
-            val = host
+            # Use exact Host header (includes port) for signature authority alignment
+            val = request.headers.get("host") or request.url.netloc or ""
         elif lc == "content-digest":
             val = headers.get("content-digest", "")
         elif lc == "content-type":

@@ -84,3 +84,33 @@ proxy_set_header X-TLS-Session-ID $ssl_session_id;
 ## License
 
 MIT
+
+## TLS Exporter via Envoy (Channel Binding Upgrade)
+
+The stack now supports an Envoy sidecar that injects a pseudo `x-tls-exporter` header (placeholder hash) consumed by the PCH middleware when `BINDING_TYPE=tls-exporter`.
+
+Quick start (PowerShell / Windows dev):
+
+```powershell
+docker compose up -d --build redis app envoy
+curl.exe -k -I https://localhost:8443/protected   # obtain PCH challenge (401)
+.\.venv\Scripts\python.exe tools\pch_client_demo.py --url https://localhost:8443/protected --binding tls-exporter --insecure
+curl.exe -k https://localhost:8443/__metrics | jq '.routes[] | select(.route=="/protected")'
+```
+
+Convenience script:
+```powershell
+scripts\e2e_envoy_exporter.ps1 -Insecure
+```
+
+Environment (see `docker-compose.yml`):
+
+```
+BINDING_TYPE=tls-exporter
+BINDING_HEADER=X-TLS-Exporter
+REQUIRE_TLS_EXPORTER=true
+```
+
+`/echo/headers` now returns `x-tls-exporter` to aid debugging.
+
+> NOTE: Lua filter produces a non-RFC exporter digest. Replace with a real TLS exporter (RFC 9266) for production (WASM or compiled filter accessing SSL exporter API).

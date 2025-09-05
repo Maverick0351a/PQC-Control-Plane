@@ -10,3 +10,8 @@ SERVER_SIGNING_KEY = os.getenv("SERVER_SIGNING_KEY", "keys/sth_ed25519_sk.pem")
 CLIENT_KEYS = os.getenv("CLIENT_KEYS", "config/clients.json")
 BINDING_HEADER = os.getenv("BINDING_HEADER", "X-TLS-Session-ID")  # MVP; later: exporter
 BINDING_TYPE = os.getenv("BINDING_TYPE", "tls-session-id")        # later: tls-exporter
+
+# Enforcement / guard configuration
+ENFORCE_PCH_ROUTES = [p.strip() for p in os.getenv("ENFORCE_PCH_ROUTES", "").split(",") if p.strip()]
+REQUIRE_TLS_EXPORTER = os.getenv("REQUIRE_TLS_EXPORTER", "false").lower() == "true"
+BREAKER_ENABLED = os.getenv("BREAKER_ENABLED", "false").lower() == "true"

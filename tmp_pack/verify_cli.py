@@ -1,5 +1,7 @@
-
-import json, sys, base64, hashlib
+import base64
+import hashlib
+import json
+import sys
 
 def verify(sth_path, receipts_path, proofs_dir):
     # load sth

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   app:
     build: .
@@ -11,23 +9,36 @@ services:
       - DATA_DIR=/app/var/data
       - SERVER_SIGNING_KEY=/app/keys/sth_ed25519_sk.pem
       - CLIENT_KEYS=/app/config/clients.json
+  # Enable TLS exporter channel binding end-to-end (Envoy injects x-tls-exporter)
+  - BINDING_TYPE=tls-exporter
+  - BINDING_HEADER=X-TLS-Exporter
+  # Enforce presence of exporter (deny if missing)
+  - REQUIRE_TLS_EXPORTER=true
     depends_on:
       - redis
     ports:
       - "8080:8080"
+    volumes:
+      # Mount signing keys (private + public) read-only so we can rotate/regenerate without rebuilding image
+      - ./keys:/app/keys:ro
+      # Mount client key registry / config mapping
+      - ./config:/app/config:ro
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
-  nginx:
-    image: nginx:1.27-alpine
+  envoy:
+    build: ./sandbox/envoy
+    image: signet-envoy:latest
     depends_on:
       - app
+    # Expose Envoy directly on 8443 now that nginx is removed
     ports:
       - "8443:8443"
+    environment:
+      - BINDING_TYPE=tls-exporter
     volumes:
-      - ./src/signet/ingress/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Dev self-signed certs (generated via scripts/gen_dev_tls.ps1)
-      - ./src/signet/ingress/certs:/etc/nginx/certs:ro
+      - ./sandbox/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./sandbox/envoy/certs:/etc/envoy/certs:ro

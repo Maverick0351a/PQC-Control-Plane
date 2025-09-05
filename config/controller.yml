@@ -1,0 +1,23 @@
+weights:
+  alpha: 0.45   # PQC_rate weight
+  beta: 0.35    # (1 - failure_rate) weight
+  gamma: 0.20   # SLO headroom weight
+thresholds:
+  trip_open: 0.25          # EWMA error rate to trip Open
+  close_successes: 10      # N_C to close from HalfOpen
+  cooldown_sec: 20
+slo:
+  target_p50_ms: 100
+  target_p95_ms: 300
+header_budget:
+  max_total_bytes: 12000
+  max_single_header_bytes: 8000
+  max_signature_bytes: 5000
+safety:
+  availability_floor_5xx_ewma: 0.05
+  require_tls_exporter: true
+binding:
+  type: tls-session-id   # will switch to tls-exporter after Envoy step
+guard:
+  enforce_routes:
+    - /protected

@@ -4,6 +4,7 @@ import time
 import httpx
 import hashlib
 from cryptography.hazmat.primitives import serialization
+from urllib.parse import urlparse
 
 def b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
@@ -11,9 +12,8 @@ def b64(data: bytes) -> str:
 def content_digest(data: bytes) -> str:
     return f"sha-256=:{b64(hashlib.sha256(data).digest())}:"
 
-def build_signature_base(method, url, headers, components, params, evidence_sha256_hex):
+def build_signature_base(method, url, headers, components, params, evidence_sha256_hex, override_authority=None):
     # Minimal base builder matching server's logic
-    from urllib.parse import urlparse
     u = urlparse(url)
     path = u.path or "/"
     if u.query:
@@ -26,8 +26,8 @@ def build_signature_base(method, url, headers, components, params, evidence_sha2
         elif lc == "@path":
             val = path
         elif lc == "@authority":
-            # Use hostname only for canonical authority (dev parity with server)
-            val = u.hostname
+            # Allow explicit override; else prefer Host header (includes port), else netloc/hostname
+            val = override_authority or headers.get("host") or u.netloc or u.hostname
         elif lc == "content-digest":
             val = headers.get("content-digest", "")
         elif lc == "pch-challenge":
@@ -54,46 +54,83 @@ def main():
     ap.add_argument("--body", default='{"demo":true}')
     ap.add_argument("--key", default="keys/client_demo_sk.pem")
     ap.add_argument("--insecure", action="store_true", help="Skip TLS verification (dev only)")
+    ap.add_argument("--authority", help="override @authority in signature base (does NOT change actual Host header)")
+    ap.add_argument("--binding", choices=["tls-session-id","tls-exporter"], default="tls-session-id")
     args = ap.parse_args()
 
-    # Step 1+2: challenge then signed request
-    tls_session_id = "devsession"  # default synthetic id (overridden for HTTPS if debug header present)
+    # Step 1: Obtain challenge (always send stable synthetic binding id for dev)
+    binding_id = "devsession"
     with httpx.Client(verify=not args.insecure) as s:
-        r1 = s.get(args.url, headers={"X-TLS-Session-ID": tls_session_id})
+        initial_headers = {"X-TLS-Session-ID": binding_id}
+        if args.binding == "tls-exporter":
+            # First hop through envoy; exporter header added by proxy. We may need /echo/headers to read it.
+            pass
+        r1 = s.get(args.url, headers=initial_headers)
         if r1.status_code != 401:
             print("Unexpected status", r1.status_code, r1.text)
             return
         pch_challenge = r1.headers.get("PCH-Challenge")
         debug_tls = r1.headers.get("X-Debug-TLS-Session-ID")
-        if debug_tls:
-            tls_session_id = debug_tls
         print("Challenge header received:", pch_challenge)
-        print("TLS session id used:", tls_session_id)
+        print("TLS session id (server debug):", debug_tls or "n/a")
+        print("Binding id used (X-TLS-Session-ID & channel-binding):", binding_id)
 
+        # Step 2: Signed POST with same binding id (nonce key matches)
         body = args.body.encode()
-        headers = {
-            "content-digest": content_digest(body),
-            "content-type": "application/json",
-            "pch-challenge": pch_challenge,
-            "pch-channel-binding": f"tls-session-id=:{b64(tls_session_id.encode())}:",
-            "X-TLS-Session-ID": tls_session_id,
-        }
+        if args.binding == "tls-exporter":
+            # Attempt to fetch exporter via /echo/headers diagnostic (same host)
+            echo_url = args.url.rsplit('/',1)[0] + "/echo/headers"
+            try:
+                echo = s.get(echo_url, headers={"X-TLS-Session-ID": binding_id})
+                exporter = echo.json().get("headers",{}).get("x-tls-exporter")
+            except Exception:
+                exporter = None
+            if not exporter:
+                print("Could not obtain tls-exporter header via echo endpoint; aborting")
+                return
+            binding_line = f"tls-exporter=:{exporter}:"
+            base_headers = {
+                "content-digest": content_digest(body),
+                "content-type": "application/json",
+                "pch-challenge": pch_challenge,
+                "pch-channel-binding": binding_line,
+                "X-TLS-Exporter": exporter,
+            }
+        else:
+            base_headers = {
+                "content-digest": content_digest(body),
+                "content-type": "application/json",
+                "pch-challenge": pch_challenge,
+                "pch-channel-binding": f"tls-session-id=:{b64(binding_id.encode())}:",
+                "X-TLS-Session-ID": binding_id,
+            }
+        req = s.build_request("POST", args.url, headers=base_headers, content=body)
+        base_headers["host"] = req.headers.get("host")
         components = ["@method","@path","@authority","content-digest","pch-challenge","pch-channel-binding"]
-        params = {"created": str(int(time.time())), "keyid":"caller-1", "alg":"ed25519"}
-        base = build_signature_base("POST", args.url, headers, components, params, evidence_sha256_hex="")
+        params = {"created": str(int(time.time())), "keyid": "caller-1", "alg": "ed25519"}
+        base = build_signature_base(
+            "POST",
+            str(req.url),
+            base_headers,
+            components,
+            params,
+            evidence_sha256_hex="",
+            override_authority=args.authority,
+        )
         print("Client signature-base:\n" + base)
         with open(args.key, "rb") as f:
             sk = serialization.load_pem_private_key(f.read(), password=None)
         sig = base64.b64encode(sk.sign(base.encode())).decode()
         components_str = " ".join([f'"{c}"' for c in components])
-        headers["signature-input"] = f"pch=({components_str});created={params['created']};keyid=\"caller-1\";alg=\"ed25519\""
-        headers["signature"] = f"pch=:{sig}:"
-        r2 = s.post(args.url, headers=headers, content=body)
+        req.headers["signature-input"] = (
+            f"pch=({components_str});created={params['created']};keyid=\"caller-1\";alg=\"ed25519\""
+        )
+        req.headers["signature"] = f"pch=:{sig}:"
+        r2 = s.send(req)
         print("POST status:", r2.status_code, r2.text)
         if r2.status_code == 200:
             try:
-                resp = r2.json()
-                print("Server PCH result:", resp.get("pch"))
+                print("Server PCH result:", r2.json().get("pch"))
             except Exception:
                 pass
 

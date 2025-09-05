@@ -1,0 +1,77 @@
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 8443 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: app
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                route: { cluster: app }
+          http_filters:
+          - name: envoy.filters.http.lua
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                local ffi = require("ffi")
+                ffi.cdef[[
+                  unsigned long OpenSSL_version_num(void);
+                ]]
+                local function simple_sha256(data)
+                  -- very small pure-Lua SHA256 (placeholder) using OpenSSL via shell not available; keep deterministic
+                  local resty = require('sha256') -- Expect a lightweight bundled module; if missing, fallback base64 of data
+                  return resty.sha256(data)
+                end
+                function envoy_on_request(handle)
+                  local ssl = handle:streamInfo():downstreamSslConnection()
+                  local sid = ''
+                  if ssl then
+                    local s = ssl:sessionId() or ''
+                    sid = s
+                  end
+                  if sid == '' then
+                    sid = 'devsession'
+                  end
+                  -- Pseudo exporter: sha256("EXPORTER-Channel-Binding" || sid) first 32 bytes -> base64
+                  local raw = 'EXPORTER-Channel-Binding' .. sid
+                  local digest = simple_sha256(raw)
+                  if not digest or #digest < 32 then
+                    digest = raw .. string.rep('\0', 32 - #raw)
+                  end
+                  local b = handle:base64Encode(digest)
+                  handle:headers():add('x-tls-exporter', b)
+                end
+          - name: envoy.filters.http.router
+            typed_config: {}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+        common_tls_context:
+          tls_certificates:
+          - certificate_chain: { filename: "/etc/envoy/server.crt" }
+            private_key: { filename: "/etc/envoy/server.key" }
+  clusters:
+  - name: app
+    connect_timeout: 0.25s
+    type: logical_dns
+    lb_policy: round_robin
+    load_assignment:
+      cluster_name: app
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: { address: app, port_value: 8080 }
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
