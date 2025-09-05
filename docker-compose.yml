@@ -32,7 +32,6 @@ services:
     image: signet-envoy:latest
     depends_on:
       - app
-    # Expose Envoy directly on 8443 now that nginx is removed
     ports:
       - "8443:8443"
     environment:
@@ -65,6 +64,20 @@ services:
       - ./ops/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana_data:/var/lib/grafana
 
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - app
+    ports:
+      - "8444:8443" # expose nginx on alternate host port for impairment tests
+    volumes:
+      - ./src/signet/ingress/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./sandbox/envoy/certs:/etc/nginx/certs:ro
+    cap_add:
+      - NET_ADMIN
+    command: ["sh","-lc","nginx -g 'daemon off;'"]
+
 volumes:
   prom_data: {}
   grafana_data: {}
+
