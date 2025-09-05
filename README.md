@@ -86,6 +86,16 @@ $env:PYTHONPATH = "src"; python -m signet.vsp.cli .\scenarios\sample-chaos.yaml 
 PYTHONPATH=src python -m signet.vsp.cli ./scenarios/sample-chaos.yaml --bundle ./var/packs/vsp-run.zip
 ```
 
+Verify the pack offline (inclusion proofs vs EVG STH):
+
+```powershell
+$env:PYTHONPATH = "src"; python -m signet.compliance.verify_cli .\var\packs\vsp-run.zip
+```
+
+```bash
+PYTHONPATH=src python -m signet.compliance.verify_cli ./var/packs/vsp-run.zip
+```
+
 ### Environment
 
 Create `.env` (or export variables):
@@ -167,6 +177,10 @@ Breaker / relax actuator interplay: spikes in header bytes + 431 / 428 responses
 - PQC libs: ML‑DSA (Dilithium3) requires optional liboqs / python wrapper; tests skip gracefully if absent.
 - Hybrid verification requires both classical and PQC parts succeed.
 - PowerShell here‑docs (e.g., `python - << 'PY'`) are not supported; run modules with `python -m` and set `PYTHONPATH=src` as shown above.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See `LICENSE`.
 
 ## License
 

@@ -27,19 +27,43 @@ def bundle_compliance_pack(output_path: str, evg_url: Optional[str] = None, date
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        leaf_hashes = []
         if os.path.exists(receipts_path):
-            zf.write(receipts_path, arcname="receipts.jsonl")
+            # copy receipts and gather leaf hashes
+            with open(receipts_path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            zf.writestr("receipts.jsonl", "\n".join(lines))
+            for ln in lines:
+                if not ln.strip():
+                    continue
+                try:
+                    obj = json.loads(ln)
+                    lh = obj.get("leaf_hash_b64")
+                    if lh:
+                        leaf_hashes.append(lh)
+                except Exception:
+                    pass
         else:
-            # create an empty placeholder
             zf.writestr("receipts.jsonl", "")
-        # Optional STH from EVG
+
+        # Optional STH and proofs from EVG
         if evg_url:
+            base = evg_url.rstrip('/')
             try:
                 with httpx.Client(timeout=5.0) as client:
-                    r = client.get(f"{evg_url.rstrip('/')}/sth")
+                    r = client.get(f"{base}/sth")
                     r.raise_for_status()
                     zf.writestr("evg_sth.json", json.dumps(r.json(), ensure_ascii=False))
-            except Exception as _:
-                # Include a stub error marker (non-fatal)
+                    # fetch proofs for each leaf
+                    proofs = {}
+                    for lh in leaf_hashes:
+                        try:
+                            pr = client.get(f"{base}/__evg/proof", params={"leaf": lh})
+                            if pr.status_code == 200:
+                                proofs[lh] = pr.json()
+                        except Exception:
+                            continue
+                    zf.writestr("evg_proofs.json", json.dumps(proofs, ensure_ascii=False))
+            except Exception:
                 zf.writestr("evg_sth.json", json.dumps({"error": "sth_fetch_failed"}))
     return output_path

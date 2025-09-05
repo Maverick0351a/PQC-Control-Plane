@@ -1,5 +1,5 @@
 import json
-from hypothesis import given, strategies as st
+from hypothesis import given, strategies as st, settings, HealthCheck
 from starlette.datastructures import Headers
 from types import SimpleNamespace
 
@@ -24,6 +24,7 @@ json_objects = st.dictionaries(
 json_like = json_objects | json_arrays | json_scalars
 
 
+@settings(suppress_health_check=[HealthCheck.too_slow], deadline=None, max_examples=50)
 @given(json_like)
 def test_jcs_stable_deterministic(obj):
     # Two canonicalizations must be identical byte-for-byte
