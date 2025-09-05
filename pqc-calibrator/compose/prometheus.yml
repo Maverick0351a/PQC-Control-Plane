@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: pqc-go-server
+    static_configs:
+      - targets: ["pqc-go-server:8443"]
+  - job_name: calibrate
+    static_configs:
+      - targets: ["host.docker.internal:7070"]

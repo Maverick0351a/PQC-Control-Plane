@@ -29,6 +29,11 @@ def _cobb_douglas(pqc_rate, failure_rate, slo_headroom, w):
 
 def plan_action(obs: Dict[str, Any], cfg: ControllerConfig, st: ControllerState) -> Tuple[str, BreakerState, Dict[str, Any]]:
     """Return (action, next_state, rationale)."""
+    import os
+    if os.getenv("SIGNET_GSC_ENABLED", "true").lower() != "true":
+        # Feature disabled: always attempt PQC inside Closed state; reset state if previously tripped
+        st.state = BreakerState.CLOSED
+        return "ATTEMPT_PQC", st.state, {"reason": "gsc_disabled"}
     # Update queue metrics snapshot
     rho, Wq = compute_rho_and_wq(st, cfg.c_servers)
     st.rho = rho
@@ -182,7 +187,8 @@ def plan(route: str):  # pragma: no cover - legacy path
             rs = monitor.routes.get(route)
             if rs:
                 st = load_state(route)
-                st.err_ewma_pqc = getattr(rs.ewma_error, 'value', 0.0)
+                if st.err_ewma_pqc == 0.0:
+                    st.err_ewma_pqc = getattr(rs.ewma_error, 'value', 0.0)
         except Exception:
             pass
     st = load_state(route)

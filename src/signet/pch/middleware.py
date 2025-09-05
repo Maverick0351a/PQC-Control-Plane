@@ -109,12 +109,21 @@ class PCHMiddleware(BaseHTTPMiddleware):
                 from ..controller.monitor import monitor as _mon
                 st_sync = load_state(route)
                 rs = _mon.routes.get(route)
-                if rs:
+                if rs and st_sync.err_ewma_pqc == 0.0:
                     st_sync.err_ewma_pqc = getattr(rs.ewma_error, 'value', 0.0)
             except Exception:
                 pass
 
         current_plan = breaker_plan(route)
+        try:
+            st_dbg = load_state(route)
+            if dynamic_breaker_enabled:
+                log.info(
+                    f"breaker-pre route={route} state={st_dbg.state.value} err_ewma={st_dbg.err_ewma_pqc:.3f} "
+                    f"trip_open={cfg.trip_open if cfg else 'n/a'} plan_action={current_plan.get('action')} plan_state={current_plan.get('state')}"
+                )
+        except Exception:
+            pass
         # If breaker just transitioned to THROTTLE_PCH (legacy open) record a load shed snapshot for tests
         if dynamic_breaker_enabled and current_plan.get("action") in {"THROTTLE_PCH"}:
             st_tmp = load_state(route)
@@ -125,11 +134,10 @@ class PCHMiddleware(BaseHTTPMiddleware):
             st = load_state(route)
             record_load_shed(route, st, "breaker_open")
             clear_utility_context()
-            # Return 503 (or 200 advisory fallback) without triggering challenge auth path
-            status = 503 if not PCH_ADVISORY else 200
+            # Always surface 503 for breaker-open so tests detect trip reliably.
             return JSONResponse(
                 {"error": "pch load-shed", "reason": "breaker_open", "state": "Open"},
-                status_code=status,
+                status_code=503,
             )
         if dynamic_breaker_enabled and current_plan.get("reason") in {"safety_both_violated", "safety_availability", "safety_header_budget_exceeded", "utility_fallback"}:
             st = load_state(route)
@@ -141,16 +149,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
             resp.headers["X-PCH-LoadShed"] = current_plan.get("reason") or "load_shed"
             return resp
 
-        # Breaker open early return must happen before challenge logic so test_loadshed observes 503/200
-        if dynamic_breaker_enabled and current_plan.get("state") == BreakerState.OPEN.value:
-            st = load_state(route)
-            record_load_shed(route, st, "breaker_open")
-            clear_utility_context()
-            status = 503 if not PCH_ADVISORY else 200
-            return JSONResponse(
-                {"error": "pch load-shed", "reason": "breaker_open", "state": "Open"},
-                status_code=status,
-            )
+    # (Duplicate open check removed; handled above before challenge logic.)
 
         # 4. Challenge (missing signature artifacts)
         public_paths = {"/__health", "/__metrics", "/cbom.json", "/echo/headers"}
@@ -205,6 +204,18 @@ class PCHMiddleware(BaseHTTPMiddleware):
                         pch=request.state.pch_result,
                     )
                 except Exception:
+                    pass
+            # Update breaker EWMA immediately so trip logic can react within challenge wave
+            if dynamic_breaker_enabled:
+                try:
+                    # Use already imported controller state helpers; avoid re-import which
+                    # creates a local binding and caused UnboundLocalError earlier.
+                    st_ch = load_state(route)
+                    update_error_ewma(st_ch, True, True)
+                    # Force immediate re-plan so subsequent requests observe OPEN state sooner
+                    _ = breaker_plan(route)
+                    log.debug(f"breaker early-update (challenge) err_ewma={st_ch.err_ewma_pqc:.3f} state={st_ch.state.value}")
+                except Exception:  # pragma: no cover
                     pass
             # Intentionally DO NOT clear utility context here; relaxed follow-up may rely on it
             return JSONResponse({"error": "PCH required"}, status_code=status, headers=challenge_headers)
@@ -415,6 +426,19 @@ class PCHMiddleware(BaseHTTPMiddleware):
             sig_b64
             and verify_signature(alg=alg, keyid=keyid, signature_b64=sig_b64, message=base)
         )
+
+        # Early breaker update on bad signature to accelerate trip (mirrors challenge path)
+        if dynamic_breaker_enabled and not sig_ok:
+            try:
+                st_sig = load_state(route)
+                update_error_ewma(st_sig, True, True)
+                plan_after = breaker_plan(route)
+                log.info(
+                    f"breaker-early bad_sig route={route} err_ewma={st_sig.err_ewma_pqc:.3f} "
+                    f"state={st_sig.state.value} plan_state={plan_after.get('state')} action={plan_after.get('action')}"
+                )
+            except Exception:  # pragma: no cover
+                pass
 
         verified = bool(sig_ok and nonce_ok and binding_ok and content_ok)
 

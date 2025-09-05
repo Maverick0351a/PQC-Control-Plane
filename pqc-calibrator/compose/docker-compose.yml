@@ -1,0 +1,41 @@
+services:
+  pathlab:
+    build: ./services/pathlab
+    ports: ["15000:15000", "15001:15001"]
+
+  pqcoaster:
+    build: ./services/pqcoaster
+    network_mode: host
+    privileged: true
+
+  pqc-go-server:
+    build: ./services/pqc-endpoints/go-server
+    environment:
+      - TLS_GROUPS=X25519,MLKEM768,HYBRID
+    ports: ["8443:8443"]
+
+  pqc-go-client:
+    build: ./services/pqc-clients/go-client
+
+  gsc:
+    build: ./services/signet/gsc
+  cab:
+    build: ./services/signet/cab
+  cbom:
+    build: ./services/signet/cbom
+  sndt:
+    build: ./services/signet/sndt
+  evg:
+    build: ./services/signet/evg
+  dpcp:
+    build: ./services/signet/dpcp
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+    volumes: ["./../grafana:/var/lib/grafana"]

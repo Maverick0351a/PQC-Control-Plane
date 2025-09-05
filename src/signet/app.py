@@ -9,7 +9,7 @@ from .utils.logging import get_logger
 from .utils.breaker_metrics import breaker_metrics
 from .controller.monitor import monitor
 from .controller.state import load_state
-from .controller.plan import last_decisions
+from .controller.plan import last_decisions, plan as controller_plan
 from .controller.config import load_config
 from .cbom.export import build_cbom
 from .obs.prom import prometheus_latest
@@ -81,9 +81,12 @@ async def metrics():
         mean_service = sv.mean if sv.count else 0.0
         Ca2 = ia.variance / (mean_inter ** 2) if mean_inter > 0 else 0.0
         Cs2 = sv.variance / (mean_service ** 2) if mean_service > 0 else 0.0
+        # Pull current plan to expose utility values if available
+        plan_snapshot = controller_plan(r)
+        utility = plan_snapshot.get("utility") or {}
         routes_data.append({
             "route": r,
-            "state": snap.name,
+            "state": plan_snapshot.get("state", snap.name),
             "rho": round(getattr(snap, 'rho', 0.0), 6),
             "Ca2": round(Ca2, 6),
             "Cs2": round(Cs2, 6),
@@ -93,12 +96,26 @@ async def metrics():
             "ewma_5xx": 0.0,  # placeholder (no global 5xx EWMA yet)
             "consecutive_successes": snap.consecutive_successes,
             "deadband": {"open": cfg.trip_open, "close_successes": cfg.close_successes},
+            "U": utility,  # {u_attempt, u_fallback}
         })
+    # Global rates
+    attempts = max(1, int(mon.get("pqc_attempts_total", 0)))
+    verified = int(mon.get("pqc_verified_total", 0))
+    pqc_success_rate = verified / attempts
+    header_431_total = int(mon.get("http_431_total", 0))
+    dpcp_total = int(mon.get("dpcp_total", 0))
+    dpcp_ekm_bound_total = int(mon.get("dpcp_ekm_bound_total", 0))
+    dpcp_profile_counts = mon.get("dpcp_profile_counts", {})
     return JSONResponse({
         "routes": routes_data,
         "decisions": last_decisions(),
-        "monitor": mon,  # include raw monitor snapshot for tests expecting this key
-        "header_431_total": sum(1 for r, st in mon.get("routes", {}).items() for ev in [st] if isinstance(st, dict)),  # placeholder aggregate
+        "monitor": mon,
+        "pqc_success_rate": pqc_success_rate,
+        "header_431_total": header_431_total,
+        "header_total_bytes_hist": mon.get("header_total_bytes_hist", {}),
+        "dpcp_total": dpcp_total,
+        "dpcp_ekm_bound_total": dpcp_ekm_bound_total,
+        "dpcp_profile_counts": dpcp_profile_counts,
     })
 
 @app.get("/metrics")

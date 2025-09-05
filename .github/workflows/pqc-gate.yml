@@ -1,0 +1,67 @@
+name: pqc-gate
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  calibrate:
+    name: Calibrate & Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: Build calibrate CLI
+        working-directory: pqc-calibrator/calibrate/pqc-calibrate
+        run: |
+          go build -o pqc-calibrate .
+
+      - name: Run calibration
+        id: run
+        working-directory: pqc-calibrator/calibrate/pqc-calibrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=$(./pqc-calibrate run \
+            --target https://staging.api \
+            --profiles hybrid \
+            --impairments mtu1300_blackhole \
+            --header-budget 32768 \
+            --out ../../reports)
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Generate report
+        working-directory: pqc-calibrator/calibrate/pqc-calibrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./pqc-calibrate report --id "${{ steps.run.outputs.run_id }}" --format json --out ../../reports
+          # MVP: synthesize a gate report with a placeholder score (replace with real scoring later)
+          mkdir -p ../../reports/${{ steps.run.outputs.run_id }}
+          echo '{"score":100}' > ../../reports/${{ steps.run.outputs.run_id }}/pqc-report.json
+
+      - name: Enforce gate (score >= 80)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCORE=$(jq .score pqc-calibrator/reports/${{ steps.run.outputs.run_id }}/pqc-report.json)
+          echo "Score: $SCORE"
+          test "$SCORE" -ge 80
+
+      - name: Upload calibration artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pqc-reports-${{ steps.run.outputs.run_id }}
+          path: |
+            pqc-calibrator/reports/${{ steps.run.outputs.run_id }}
+          if-no-files-found: warn

@@ -18,6 +18,32 @@ static_resources:
               - match: { prefix: "/" }
                 route: { cluster: app }
           http_filters:
+          - name: envoy.filters.http.lua
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                -- DPCP Dual Proof Lua Filter
+                -- 1) Extract exporter (if injected by lower network filter or native extension)
+                -- 2) Derive mac_key = HKDF-Expand(exporter, "DPR-MAC-Key/v1", 32)
+                -- 3) Pass through base64 exporter internally OR compute early tag (optional)
+                local b64 = require('base64')
+                local sha256 = require('resty.sha256') -- placeholder; Envoy Lua has cryptographic limits; demonstration only
+                function envoy_on_request(handle)
+                  local route = handle:headers():get(":path") or "";
+                  if not route:find("/protected") then
+                    return -- only guard protected paths
+                  end
+                  local exporter = handle:headers():get("x-tls-exporter")
+                  if not exporter then
+                    return
+                  end
+                  -- Mark internal scoping
+                  handle:headers():add("X-Signet-Internal", "1")
+                  -- Forward exporter base64 inside perimeter; app will HKDF + HMAC
+                  handle:headers():add("X-TLS-Exporter-B64", exporter)
+                  -- Strip original injector header to reduce propagation surface
+                  handle:headers():remove("x-tls-exporter")
+                end
           # Optional DPR signer WASM filter (insert before Lua + router). Provide compiled module at /etc/envoy/wasm/dpr_signer.wasm
           - name: envoy.filters.http.wasm
             typed_config:

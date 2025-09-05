@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Signet Receipt v1",
+  "type": "object",
+  "required": ["type", "time", "actor", "claims"],
+  "properties": {
+    "type": {"const": "signet.receipt.v1"},
+    "subtype": {"type": "string"},
+    "time": {"type": "string", "format": "date-time"},
+    "actor": {
+      "type": "object",
+      "required": ["service"],
+      "properties": {
+        "service": {"type": "string"},
+        "route": {"type": "string"}
+      }
+    },
+    "claims": {"type": "object"},
+    "sig": {
+      "type": "object",
+      "properties": {
+        "alg": {"type": "string"},
+        "kid": {"type": "string"},
+        "sig_b64": {"type": "string"}
+      }
+    },
+    "sth_ref": {
+      "type": "object",
+      "properties": {
+        "log_id": {"type": "string"},
+        "size": {"type": "integer"},
+        "root": {"type": "string"},
+        "epoch": {"type": "string"}
+      }
+    }
+  }
+}

@@ -1,0 +1,123 @@
+package main
+
+// EVG (Evidence Graph) bootstrap server.
+// Minimal ingestion + Merkle root publication + verification endpoint.
+// Endpoints:
+//  POST /ingest  (body: arbitrary JSON receipt) -> {status, size, root}
+//  GET  /sth     -> {log_id, size, root, epoch}
+//  POST /__evg/verify {receipt:<obj>} -> {present:bool, leaf_hash, size, root}
+//  GET  /__health
+//  (optional) GET /__compliance-pack.zip -> 501 placeholder
+
+import (
+    "crypto/sha256"
+    "encoding/base64"
+    "encoding/json"
+    "log"
+    "net/http"
+    "os"
+    "sync"
+    "time"
+)
+
+type Leaf struct {
+    Raw       json.RawMessage
+    HashBytes [32]byte
+}
+
+type LogState struct {
+    mu    sync.RWMutex
+    leaves []Leaf
+    logID string
+}
+
+func (ls *LogState) append(raw json.RawMessage) (size int, root string, leafHash string) {
+    ls.mu.Lock()
+    defer ls.mu.Unlock()
+    h := sha256.Sum256(raw)
+    ls.leaves = append(ls.leaves, Leaf{Raw: raw, HashBytes: h})
+    size = len(ls.leaves)
+    root = ls.computeRootLocked()
+    leafHash = base64.StdEncoding.EncodeToString(h[:])
+    return
+}
+
+func (ls *LogState) computeRootLocked() string {
+    if len(ls.leaves) == 0 { return "" }
+    // Simple balanced recompute each time (O(n)); fine for MVP scale.
+    hashes := make([][]byte, len(ls.leaves))
+    for i,l := range ls.leaves { h := l.HashBytes; hashes[i] = h[:] }
+    for len(hashes) > 1 {
+        var next [][]byte
+        for i := 0; i < len(hashes); i+=2 {
+            if i+1 == len(hashes) { // odd
+                next = append(next, hashes[i])
+            } else {
+                b := append(hashes[i], hashes[i+1]...)
+                hh := sha256.Sum256(b)
+                next = append(next, hh[:])
+            }
+        }
+        hashes = next
+    }
+    return base64.StdEncoding.EncodeToString(hashes[0])
+}
+
+func (ls *LogState) rootSnapshot() (size int, root string) {
+    ls.mu.RLock(); defer ls.mu.RUnlock()
+    size = len(ls.leaves)
+    root = ls.computeRootLocked()
+    return
+}
+
+func (ls *LogState) verify(raw json.RawMessage) (present bool, leafHash string, size int, root string) {
+    h := sha256.Sum256(raw)
+    leafHash = base64.StdEncoding.EncodeToString(h[:])
+    ls.mu.RLock(); defer ls.mu.RUnlock()
+    for _, l := range ls.leaves { if l.HashBytes == h { present = true; break } }
+    size = len(ls.leaves)
+    root = ls.computeRootLocked()
+    return
+}
+
+func main(){
+    port := os.Getenv("EVG_PORT")
+    if port == "" { port = "8088" }
+    state := &LogState{logID: "evg"}
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/__health", func(w http.ResponseWriter, r *http.Request){
+        w.Header().Set("Content-Type","application/json");
+        w.Write([]byte(`{"status":"ok"}`))
+    })
+    mux.HandleFunc("/sth", func(w http.ResponseWriter, r *http.Request){
+        size, root := state.rootSnapshot()
+        obj := map[string]any{"log_id": state.logID, "size": size, "root": root, "epoch": time.Now().UTC().Format("2006-01-02")}
+        enc(w,obj)
+    })
+    mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request){
+        defer r.Body.Close()
+        var raw json.RawMessage
+        if err := json.NewDecoder(r.Body).Decode(&raw); err != nil { http.Error(w, err.Error(), 400); return }
+        size, root, leaf := state.append(raw)
+        enc(w, map[string]any{"status":"ok","size":size,"root":root,"leaf_hash":leaf})
+    })
+    mux.HandleFunc("/__evg/verify", func(w http.ResponseWriter, r *http.Request){
+        defer r.Body.Close()
+        var body struct { Receipt json.RawMessage `json:"receipt"` }
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, err.Error(),400); return }
+        present, leaf, size, root := state.verify(body.Receipt)
+        enc(w, map[string]any{"present":present,"leaf_hash":leaf,"size":size,"root":root})
+    })
+    mux.HandleFunc("/__compliance-pack.zip", func(w http.ResponseWriter, r *http.Request){
+        http.Error(w, "not implemented", http.StatusNotImplemented)
+    })
+
+    log.Printf("[evg] listening on :%s", port)
+    if err := http.ListenAndServe(":"+port, mux); err != nil { log.Fatal(err) }
+}
+
+func enc(w http.ResponseWriter, v any) {
+    w.Header().Set("Content-Type","application/json")
+    _ = json.NewEncoder(w).Encode(v)
+}

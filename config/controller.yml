@@ -35,3 +35,27 @@ dpcp:
   privacy:
     redact_identities: true
     asn_granularity: asn
+
+receipts:
+  enabled: true
+  sink_url: http://evg-sink:8080/ingest
+  ed25519_key_ref: receipts/ed25519
+  exporter_binding:
+    enabled: true
+    type: tls-exporter-hmac-v1
+  include_claims:
+    sndt: true
+    cab: true
+    ppa: true
+
+sndt:
+  enabled: true
+  sample_percent: 100
+
+cab:
+  enabled: true
+  header_expose: true   # add x-crypto-passport header if enabled
+
+ppa:
+  enabled: true
+  cache_ttl_sec: 300

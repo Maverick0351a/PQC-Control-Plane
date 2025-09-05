@@ -12,6 +12,7 @@
 - **Content Integrity**: Enforces `Content-Digest: sha-256=:…:` per **RFC 9530**.
 - **JCS Canonicalization (RFC 8785)**: All signed JSON (evidence, receipts) is canonicalized (subset: strings/ints only) to ensure hash stability.
 - **Receipts + Transparency**: Every decision emits a canonical, hash‑linked receipt. Daily Merkle tree + **Signed Tree Head** (Ed25519) + inclusion proofs. **Compliance Pack** bundler + offline verifier.
+- **DPCP (advisory)**: Data Provenance Checkpoint per request with optional EKM binding; surfaced in receipts and `/__metrics` (`dpcp_total`, `dpcp_ekm_bound_total`, `dpcp_profile_counts`).
 - **Control‑theoretic breaker (scaffold)**: EWMA + hysteresis with safe defaults (advisory; wired for future enforcement).
 - **DX**: `tools/pch_client_demo.py` demo, Postman collection, curl recipes.
 - **Ops**: Non‑root Dockerfile, docker‑compose with Redis, Envoy (TLS exporter placeholder), Prometheus, Grafana.
@@ -55,6 +56,26 @@ curl http://localhost:8080/metrics                # Prometheus text
 pre-commit install
 ```
 
+### VSP PoC (Verifiable Simulation Platform)
+
+Run a tiny simulation scenario that emits verifiable step receipts into the normal pipeline.
+
+PowerShell (Windows):
+
+```powershell
+$env:PYTHONPATH = "src"; python -m signet.vsp.cli .\scenarios\sample-chaos.yaml
+# or
+scripts\run_vsp.ps1 -Scenario .\scenarios\sample-chaos.yaml
+```
+
+Bash:
+
+```bash
+PYTHONPATH=src python -m signet.vsp.cli ./scenarios/sample-chaos.yaml
+```
+
+The CLI prints a manifest with the emitted receipt IDs. Receipts are also appended to `var/data/YYYY-MM-DD/receipts.jsonl` and forwarded to EVG if enabled (see below).
+
 ### Environment
 
 Create `.env` (or export variables):
@@ -66,6 +87,10 @@ REDIS_URL=redis://localhost:6379/0
 DATA_DIR=var/data             # receipts / STHs
 SERVER_SIGNING_KEY=keys/sth_ed25519_sk.pem
 CLIENT_KEYS=config/clients.json
+
+# Receipt forwarding to EVG (transparency sink)
+SIGNET_EVG_ENABLED=true
+RECEIPTS_SINK_URL=http://evg:8088/ingest
 ```
 
 ### Channel Binding (Envoy TLS exporter placeholder)
@@ -118,6 +143,8 @@ Key metric families:
 | `signet_pqc_header_total_bytes` | histogram | `route` | Header size distribution |
 | `signet_pqc_signature_bytes` | histogram | `route` | Signature header size |
 | `signet_pqc_latency_ms` | histogram | `route` | Middleware latency (ms) |
+| `signet_dpcp_total` | counter |  | DPCP advisory records emitted |
+| `signet_dpcp_ekm_bound_total` | counter |  | DPCP records with EKM binding |
 
 Dashboard panels derive p50/p90 using `histogram_quantile` over `rate()` windows.
 
@@ -129,6 +156,7 @@ Breaker / relax actuator interplay: spikes in header bytes + 431 / 428 responses
 - Binding is via session id in dev; **do not** treat as cryptographically strong.
 - PQC libs: ML‑DSA (Dilithium3) requires optional liboqs / python wrapper; tests skip gracefully if absent.
 - Hybrid verification requires both classical and PQC parts succeed.
+- PowerShell here‑docs (e.g., `python - << 'PY'`) are not supported; run modules with `python -m` and set `PYTHONPATH=src` as shown above.
 
 ## License
 

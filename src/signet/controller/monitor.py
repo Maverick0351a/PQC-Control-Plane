@@ -142,6 +142,10 @@ class Monitor:
         self.http_5xx_total = 0
         self.http_431_total = 0
         self.http_timeout_total = 0
+        # DPCP (advisory provenance) counters
+        self.dpcp_total = 0
+        self.dpcp_ekm_bound_total = 0
+        self.dpcp_profile_counts: Dict[str, int] = defaultdict(int)
         # Histograms (simple bucket counts)
         self.header_total_bytes_hist: Dict[str, int] = defaultdict(int)
         self.signature_bytes_hist: Dict[str, int] = defaultdict(int)
@@ -236,6 +240,9 @@ class Monitor:
                 "http_5xx_total": self.http_5xx_total,
                 "http_431_total": self.http_431_total,
                 "http_timeout_total": self.http_timeout_total,
+                "dpcp_total": self.dpcp_total,
+                "dpcp_ekm_bound_total": self.dpcp_ekm_bound_total,
+                "dpcp_profile_counts": dict(self.dpcp_profile_counts),
                 "header_total_bytes_hist": dict(self.header_total_bytes_hist),
                 "signature_bytes_hist": dict(self.signature_bytes_hist),
                 "anomalies": dict(self.anomalies),
@@ -248,5 +255,13 @@ class Monitor:
         else:
             base["routes"] = {r: rs.snapshot() for r, rs in self.routes.items()}
         return base
+
+    def record_dpcp(self, profile: str, ekm_bound: bool):
+        with self.lock:
+            self.dpcp_total += 1
+            if ekm_bound:
+                self.dpcp_ekm_bound_total += 1
+            if profile:
+                self.dpcp_profile_counts[profile] += 1
 
 monitor = Monitor()

@@ -1,0 +1,8 @@
+name: baseline
+clients:
+  - type: go
+    target: http://pqc-go-server:8443/hello
+    rps: 5
+    duration: 10s
+notes: |
+  Baseline HTTP hello against MVP PQC server.

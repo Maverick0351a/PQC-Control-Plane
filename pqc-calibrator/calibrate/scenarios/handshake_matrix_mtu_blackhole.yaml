@@ -1,0 +1,21 @@
+name: handshake_matrix_mtu_blackhole
+target: https://api.yourservice.com
+profiles:
+  - x25519
+  - mlkem768
+  - hybrid_x25519_mlkem768
+impairments:
+  - clean
+  - mtu1300_blackhole
+  - abort_after_ch
+header_budget_bytes: 32768
+slo:
+  handshake_p95_ms: 800
+  timeout_ms: 3000
+assertions:
+  - type: hrr_compliant
+  - type: fallback_correct
+  - type: breaker_trip_on_blackhole
+artifacts:
+  receipts: true
+  report: true

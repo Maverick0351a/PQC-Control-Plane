@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   app:
     build: .
@@ -12,6 +14,8 @@ services:
       - BINDING_TYPE=tls-exporter
       - BINDING_HEADER=X-TLS-Exporter
       - REQUIRE_TLS_EXPORTER=true
+      - SIGNET_EVG_ENABLED=true
+      - RECEIPTS_SINK_URL=http://evg:8088/ingest
     depends_on:
       - redis
     ports:
@@ -69,12 +73,14 @@ services:
     ports:
       - "8443:8443"
     volumes:
-      - ./src/signet/ingress/dev.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./src/signet/ingress/certs:/etc/nginx/certs:ro
+      - ./src/signet/ingress/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./src/signet/ingress/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./src/signet/ingress/certs:/etc/nginx/certs
+      - ./src/signet/ingress/init-cert.sh:/docker-entrypoint.d/10-init-cert.sh:ro
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
-    command: ["sh","-lc","nginx -g 'daemon off;'"]
+    command: ["sh","-lc","/docker-entrypoint.d/10-init-cert.sh; nginx -g 'daemon off;'"]
 
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.6.0
@@ -82,8 +88,35 @@ services:
     depends_on:
       - nginx
     ports:
-      - "8474:8474"   # admin API
-      - "9443:9443"   # impaired TLS listener
+      - "8474:8474"
+      - "9443:9443"
+
+  evg:
+    build: ./src/signet/evg
+    image: signet-evg:latest
+    ports:
+      - "8088:8088"
+    environment:
+      - EVG_PORT=8088
+    profiles: ["dev"]
+
+  sndt:
+    build: ./src/signet/sndt
+    image: signet-sndt:latest
+    ports:
+      - "8090:8090"
+    environment:
+      - SNDT_PORT=8090
+    profiles: ["dev"]
+
+  pathlab:
+    image: ghcr.io/yourorg/pathlab:latest
+    command: ["--listen=:4040", "--upstream=nginx:443"]
+    depends_on:
+      - nginx
+    ports:
+      - "4040:4040"
+    profiles: ["dev"]
 
 volumes:
   prom_data: {}

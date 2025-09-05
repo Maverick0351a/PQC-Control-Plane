@@ -13,8 +13,8 @@ except Exception:  # pragma: no cover
     yaml = None
 
 _DEFAULT = {
-    # Legacy test expectations
-    "trip_open": 0.20,
+    # Legacy test expectations (lowered trip threshold to trigger breaker sooner under sustained failures)
+    "trip_open": 0.12,
     "close_successes": 3,
     "cooldown_sec": 5,
     "c_servers": 8,
@@ -52,6 +52,14 @@ _ENV_MAP = {
     "availability_floor": ("CONTROLLER_AVAILABILITY_FLOOR", float),
     "header_budget_max": ("CONTROLLER_HEADER_BUDGET_MAX", int),
     "slo_latency_ms": ("CONTROLLER_SLO_LATENCY_MS", int),
+    # New PR19 flag names (mapped to existing config fields)
+    # SIGNET_GSC_TH_OPEN_ERR -> trip_open, SIGNET_GSC_CLOSE_SUCCESS_N -> close_successes, etc.
+    "trip_open_pr19": ("SIGNET_GSC_TH_OPEN_ERR", float),
+    "close_successes_pr19": ("SIGNET_GSC_CLOSE_SUCCESS_N", int),
+    "cooldown_sec_pr19": ("SIGNET_GSC_COOLDOWN_SEC", int),
+    "availability_floor_pr19": ("SIGNET_AVAIL_TH_OPEN", float),
+    "header_budget_max_pr19": ("SIGNET_HEADER_MAX_BYTES", int),
+    "slo_latency_ms_pr19": ("SIGNET_GSC_WQ_SLO_MS", int),
 }
 
 _WEIGHT_ENV = {
@@ -108,15 +116,22 @@ def load_config() -> ControllerConfig:
                 pass
     # Extract optional dpcp block (kept simple; deeper validation deferred)
     dpcp_block = data.get("dpcp") if isinstance(data.get("dpcp"), dict) else None
+    # Prefer PR19 vars if present, falling back to legacy names/defaults
+    trip_open_val = data.get("trip_open_pr19", data.get("trip_open", _DEFAULT["trip_open"]))
+    close_succ_val = data.get("close_successes_pr19", data.get("close_successes", _DEFAULT["close_successes"]))
+    cooldown_val = data.get("cooldown_sec_pr19", data.get("cooldown_sec", _DEFAULT["cooldown_sec"]))
+    avail_floor_val = data.get("availability_floor_pr19", data.get("availability_floor", _DEFAULT["availability_floor"]))
+    header_budget_val = data.get("header_budget_max_pr19", data.get("header_budget_max", _DEFAULT["header_budget_max"]))
+    slo_latency_val = data.get("slo_latency_ms_pr19", data.get("slo_latency_ms", _DEFAULT["slo_latency_ms"]))
     cfg = ControllerConfig(
-        trip_open=float(data.get("trip_open", _DEFAULT["trip_open"])),
-        close_successes=int(data.get("close_successes", _DEFAULT["close_successes"])),
-        cooldown_sec=int(data.get("cooldown_sec", _DEFAULT["cooldown_sec"])),
+        trip_open=float(trip_open_val),
+        close_successes=int(close_succ_val),
+        cooldown_sec=int(cooldown_val),
         c_servers=int(data.get("c_servers", _DEFAULT["c_servers"])),
         weights=weights,
-        availability_floor=float(data.get("availability_floor", _DEFAULT["availability_floor"])),
-        header_budget_max=int(data.get("header_budget_max", _DEFAULT["header_budget_max"])),
-        slo_latency_ms=int(data.get("slo_latency_ms", _DEFAULT["slo_latency_ms"])),
+        availability_floor=float(avail_floor_val),
+        header_budget_max=int(header_budget_val),
+        slo_latency_ms=int(slo_latency_val),
         dpcp=dpcp_block,
     )
     _CONFIG = cfg

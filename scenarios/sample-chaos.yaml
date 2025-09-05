@@ -1,0 +1,17 @@
+id: vsp-demo-001
+title: "VSP PoC: simple three-step drill"
+steps:
+  - id: warmup
+    action: noop
+    args:
+      sleep_s: 0.1
+  - id: inject-fault
+    action: toggle_fault
+    args:
+      fault: abort
+      sleep_s: 0.1
+  - id: recover
+    action: toggle_fault
+    args:
+      fault: reset
+      sleep_s: 0.1
