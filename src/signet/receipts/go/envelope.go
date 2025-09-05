@@ -6,7 +6,6 @@ package receipts
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -58,31 +57,4 @@ func Verify(pub ed25519.PublicKey, obj map[string]any) error {
 	if err != nil { return err }
 	if !ed25519.Verify(pub, canon, sig) { return errors.New("bad signature") }
 	return nil
-}
-
-// DeriveBindingTag demonstrates the binding MAC derivation (not exported for now).
-func DeriveBindingTag(exporter []byte, claims map[string]any) (string, error) {
-	canon, err := Canonicalize(claims)
-	if err != nil { return "", err }
-	// HKDF-Expand single block simplification (exporter as PRK) + HMAC(PRK, info||0x01)
-	info := []byte("Signet-Receipt-Bind/v1")
-	h := sha256.New
-	macKey := hmacSingleExpand(exporter, info) // 32 bytes
-	mac := hmac(macKey, canon)
-	return base64.StdEncoding.EncodeToString(mac), nil
-}
-
-func hmacSingleExpand(prk, info []byte) []byte {
-	b := append(info, 0x01)
-	h := sha256.New()
-	h.Write(prk)
-	h.Write(b)
-	return h.Sum(nil)
-}
-
-func hmac(key, data []byte) []byte {
-	h := sha256.New()
-	h.Write(key)
-	h.Write(data)
-	return h.Sum(nil)
 }
