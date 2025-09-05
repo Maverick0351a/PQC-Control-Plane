@@ -31,38 +31,15 @@ static_resources:
                   @type: type.googleapis.com/google.protobuf.StringValue
                   value: |
                     {"key_id":"demo-ed25519","ed25519_secret_b64":"","emit_record_header":false}
-          - name: envoy.filters.http.lua
+          # Native TLS exporter injector filter (prototype) - requires custom Envoy build with extension registered.
+          - name: envoy.filters.http.tls_exporter_injector
             typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
-              inline_code: |
-                local ffi = require("ffi")
-                ffi.cdef[[
-                  unsigned long OpenSSL_version_num(void);
-                ]]
-                local function simple_sha256(data)
-                  -- very small pure-Lua SHA256 (placeholder) using OpenSSL via shell not available; keep deterministic
-                  local resty = require('sha256') -- Expect a lightweight bundled module; if missing, fallback base64 of data
-                  return resty.sha256(data)
-                end
-                function envoy_on_request(handle)
-                  local ssl = handle:streamInfo():downstreamSslConnection()
-                  local sid = ''
-                  if ssl then
-                    local s = ssl:sessionId() or ''
-                    sid = s
-                  end
-                  if sid == '' then
-                    sid = 'devsession'
-                  end
-                  -- Pseudo exporter: sha256("EXPORTER-Channel-Binding" || sid) first 32 bytes -> base64
-                  local raw = 'EXPORTER-Channel-Binding' .. sid
-                  local digest = simple_sha256(raw)
-                  if not digest or #digest < 32 then
-                    digest = raw .. string.rep('\0', 32 - #raw)
-                  end
-                  local b = handle:base64Encode(digest)
-                  handle:headers():add('x-tls-exporter', b)
-                end
+              "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+              type_url: envoy.tls_exporter.v3.TlsExporterInjector
+              value:
+                context: EXPORTER-Channel-Binding
+                out_header: x-tls-exporter
+                length: 32
           - name: envoy.filters.http.router
             typed_config: {}
     transport_socket:
