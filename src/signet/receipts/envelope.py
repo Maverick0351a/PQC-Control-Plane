@@ -15,7 +15,6 @@ prevent cross-channel grafting when exporter is present.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import uuid
 import datetime
@@ -41,21 +40,23 @@ def _load_privkey(pem_path: str) -> Ed25519PrivateKey:
         return serialization.load_pem_private_key(f.read(), password=None)
 
 
-def _hkdf_sha256(ikm: bytes, salt: bytes, info: bytes, length: int = 32) -> bytes:
-    # Minimal HKDF-Extract+Expand for internal binding use (salt=exporter, ikm empty)
-    # For simplicity (demo) treat exporter as salt and zero ikm; not general HKDF.
-    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
-    t = hmac.new(prk, info + b"\x01", hashlib.sha256).digest()
-    return t[:length]
+def _hkdf_expand_from_exporter(exporter: bytes, info: bytes, length: int = 32) -> bytes:
+    """Derive mac_key directly using exporter as PRK (HKDF-Expand only).
+
+    Spec simplification: mac_key = HKDF-Expand(exporter, info, 32)
+    (Exporter treated as already a pseudorandom key per TLS exporter properties.)
+    """
+    # For length 32 (<= one SHA256 block) a single HMAC invocation suffices.
+    t1 = hmac.new(exporter, info + b"\x01", hashlib.sha256).digest()
+    return t1[:length]
 
 
-def _binding_hmac(exporter: Optional[bytes], claims_obj: Dict[str, Any]) -> Optional[str]:
+def _binding_tag(exporter: Optional[bytes], claims_obj: Dict[str, Any]) -> Optional[str]:
     if not exporter:
         return None
-    # Derive mac key via constrained HKDF then HMAC the canonical claims for tag binding.
-    key = _hkdf_sha256(b"", exporter, HKDF_INFO, 32)
+    mac_key = _hkdf_expand_from_exporter(exporter, HKDF_INFO, 32)
     claims_bytes = jcs_canonicalize(claims_obj)
-    tag = hmac.new(key, claims_bytes, hashlib.sha256).digest()
+    tag = hmac.new(mac_key, claims_bytes, hashlib.sha256).digest()
     return base64.b64encode(tag).decode()
 
 
@@ -65,6 +66,7 @@ def build_envelope(
     exporter: Optional[bytes] = None,
     exporter_type: Optional[str] = None,
     sth_ref: Optional[Dict[str, str]] = None,
+    binding_availability: Optional[str] = None,
 ) -> Dict[str, Any]:
     env = {
         "envelope": {
@@ -76,11 +78,12 @@ def build_envelope(
         "claims": claims,
     }
     if exporter and exporter_type:
-        tag_b64 = _binding_hmac(exporter, claims)
+        availability = binding_availability or ("present" if exporter else "unavailable")
+        tag_b64 = _binding_tag(exporter, claims)
         env["envelope"]["binding"] = {
             "type": exporter_type,
             "tag_b64": tag_b64,
-            "availability": "present" if exporter else "unavailable",
+            "availability": availability,
         }
     if sth_ref:
         env["envelope"]["sth_ref"] = sth_ref
