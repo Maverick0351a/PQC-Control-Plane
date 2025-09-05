@@ -1,3 +1,4 @@
+version: '3.9'
 services:
   app:
     build: .
@@ -9,10 +10,8 @@ services:
       - DATA_DIR=/app/var/data
       - SERVER_SIGNING_KEY=/app/keys/sth_ed25519_sk.pem
       - CLIENT_KEYS=/app/config/clients.json
-      # Enable TLS exporter channel binding end-to-end (Envoy injects x-tls-exporter)
       - BINDING_TYPE=tls-exporter
       - BINDING_HEADER=X-TLS-Exporter
-      # Enforce presence of exporter (deny if missing)
       - REQUIRE_TLS_EXPORTER=true
     depends_on:
       - redis
@@ -69,12 +68,13 @@ services:
     depends_on:
       - app
     ports:
-      - "8444:8443" # expose nginx on alternate host port for impairment tests
+      - "8443:8443"
     volumes:
-      - ./src/signet/ingress/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./sandbox/envoy/certs:/etc/nginx/certs
+      - ./src/signet/ingress/dev.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./src/signet/ingress/certs:/etc/nginx/certs:ro
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     command: ["sh","-lc","nginx -g 'daemon off;'"]
 
 volumes:
