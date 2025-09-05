@@ -3,6 +3,9 @@
 #include "envoy/http/filter.h"
 #include "envoy/network/connection.h"
 #include "envoy/ssl/connection.h"
+#include "envoy/registry/registry.h"
+
+#include "google/protobuf/empty.pb.h"
 
 #include <string>
 
