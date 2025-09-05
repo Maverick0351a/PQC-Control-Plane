@@ -87,7 +87,7 @@ async def metrics():
             "rho": round(getattr(snap, 'rho', 0.0), 6),
             "Ca2": round(Ca2, 6),
             "Cs2": round(Cs2, 6),
-            "Wq_ms": round(getattr(snap, 'kingman_wq_ms', 0.0), 3),
+            "kingman_wq_ms": round(getattr(snap, 'kingman_wq_ms', 0.0), 3),
             "err_ewma_pqc": round(getattr(snap, 'err_ewma', 0.0), 6),
             "lat_ewma_ms_pqc": round(getattr(snap, 'lat_ewma', 0.0), 3),
             "ewma_5xx": 0.0,  # placeholder (no global 5xx EWMA yet)

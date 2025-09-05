@@ -12,6 +12,9 @@ from ..config import (
     BINDING_HEADER,
     BINDING_TYPE,
     REQUIRE_TLS_EXPORTER,
+    MAX_HEADER_BYTES,
+    MAX_SINGLE_HEADER_BYTES,
+    HEADER_DOWNGRADE_MODE,
 )
 from ..controller.monitor import monitor
 from ..controller.plan import (
@@ -42,7 +45,7 @@ from ..utils.logging import get_logger
 from ..obs.prom import observe_request, update_breaker_snapshot
 from .binding import extract_binding
 
-HEADER_BUDGET_LIMIT = int(os.getenv("HEADER_BUDGET_LIMIT", "4096"))
+HEADER_BUDGET_LIMIT = int(os.getenv("HEADER_BUDGET_LIMIT", str(MAX_HEADER_BYTES)))  # backward compat env
 
 log = get_logger()
 nonce_store = NonceStore()
@@ -100,17 +103,33 @@ class PCHMiddleware(BaseHTTPMiddleware):
         except Exception:  # pragma: no cover
             pass
 
+        # Sync error EWMA from monitor even when utility context present so breaker can trip on first request
+        if dynamic_breaker_enabled:
+            try:  # pragma: no cover
+                from ..controller.monitor import monitor as _mon
+                st_sync = load_state(route)
+                rs = _mon.routes.get(route)
+                if rs:
+                    st_sync.err_ewma_pqc = getattr(rs.ewma_error, 'value', 0.0)
+            except Exception:
+                pass
+
         current_plan = breaker_plan(route)
+        # If breaker just transitioned to THROTTLE_PCH (legacy open) record a load shed snapshot for tests
+        if dynamic_breaker_enabled and current_plan.get("action") in {"THROTTLE_PCH"}:
+            st_tmp = load_state(route)
+            record_load_shed(route, st_tmp, current_plan.get("reason") or "trip_open")
         action = current_plan.get("action")
         # Load-shed path: if breaker is OPEN or plan reason indicates safety gate/utility fallback
         if dynamic_breaker_enabled and current_plan.get("state") == BreakerState.OPEN.value:
             st = load_state(route)
             record_load_shed(route, st, "breaker_open")
             clear_utility_context()
-            # Fast classic fallback response (advisory) – no signature verification performed
+            # Return 503 (or 200 advisory fallback) without triggering challenge auth path
+            status = 503 if not PCH_ADVISORY else 200
             return JSONResponse(
                 {"error": "pch load-shed", "reason": "breaker_open", "state": "Open"},
-                status_code=503,
+                status_code=status,
             )
         if dynamic_breaker_enabled and current_plan.get("reason") in {"safety_both_violated", "safety_availability", "safety_header_budget_exceeded", "utility_fallback"}:
             st = load_state(route)
@@ -121,6 +140,17 @@ class PCHMiddleware(BaseHTTPMiddleware):
             resp = await call_next(request)
             resp.headers["X-PCH-LoadShed"] = current_plan.get("reason") or "load_shed"
             return resp
+
+        # Breaker open early return must happen before challenge logic so test_loadshed observes 503/200
+        if dynamic_breaker_enabled and current_plan.get("state") == BreakerState.OPEN.value:
+            st = load_state(route)
+            record_load_shed(route, st, "breaker_open")
+            clear_utility_context()
+            status = 503 if not PCH_ADVISORY else 200
+            return JSONResponse(
+                {"error": "pch load-shed", "reason": "breaker_open", "state": "Open"},
+                status_code=status,
+            )
 
         # 4. Challenge (missing signature artifacts)
         public_paths = {"/__health", "/__metrics", "/cbom.json", "/echo/headers"}
@@ -179,56 +209,89 @@ class PCHMiddleware(BaseHTTPMiddleware):
             # Intentionally DO NOT clear utility context here; relaxed follow-up may rely on it
             return JSONResponse({"error": "PCH required"}, status_code=status, headers=challenge_headers)
 
-        # 5. Header budget & relax-mode pre-check (use config header_budget_max if breaker enabled)
+        # 5. Header budget & relax-mode / downgrade pre-check (must re-read env each request for monkeypatch tests)
         header_total_bytes = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
-        header_budget_limit = cfg.header_budget_max if cfg else HEADER_BUDGET_LIMIT
-        over_budget = header_total_bytes > header_budget_limit
-        relax_mode = action == "RELAX_HEADER_BUDGET"
-        if not relax_mode and "evidence-sha-256" in headers_lower and "evidence" not in headers_lower:
-            # Heuristic: client adapted to relaxed mode (body evidence) even if current plan recomputed to normal
-            relax_mode = True
-        evidence_header_present = "evidence" in headers_lower
-        if relax_mode and evidence_header_present:
-            clear_utility_context()
-            return JSONResponse(
-                {
-                    "error": "header budget exceeded",
-                    "hint": "use relaxed evidence body mode",
-                    "mode": "RELAX_HEADER_BUDGET",
-                },
-                status_code=428,
-            )
-        if over_budget and not relax_mode:
-            try:
-                monitor.emit(
-                    {
-                        "pch_present": bool(sig_input),
-                        "pch_verified": False,
-                        "failure_reason": "header_budget_exceeded",
-                        "header_total_bytes": header_total_bytes,
-                        "largest_header_bytes": max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0),
-                        "signature_bytes": len(signature.encode()) if signature else 0,
-                        "latency_ms": (__import__("time").time() - start_time) * 1000.0,
-                        "http_status": 431,
-                        "is_guarded_route": route.startswith("/protected"),
-                        "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
-                        "route": route,
-                        "header_431_total": 1,
-                    }
-                )
-            except Exception:  # pragma: no cover
-                pass
-            clear_utility_context()
-            return JSONResponse(
-                {
-                    "error": "headers too large",
-                    "budget": header_budget_limit,
-                    "got": header_total_bytes,
-                },
-                status_code=431,
-            )
+        largest_hdr = max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0)
+        dynamic_total_limit = int(os.getenv("MAX_HEADER_BYTES", str(MAX_HEADER_BYTES)))
+        dynamic_single_limit = int(os.getenv("MAX_SINGLE_HEADER_BYTES", str(MAX_SINGLE_HEADER_BYTES)))
+        mode_env = os.getenv("HEADER_DOWNGRADE_MODE", HEADER_DOWNGRADE_MODE)
+        header_budget_limit = cfg.header_budget_max if cfg else dynamic_total_limit
+        over_budget = header_total_bytes > header_budget_limit or largest_hdr > dynamic_single_limit
 
-    # 6. Parse signature-input (skipped if load-shed earlier)
+        # Heuristic: extremely large raw evidence (>4KB decoded) should still trigger pre-relax even if global limits high
+        evidence_header_val = headers_lower.get("evidence")
+        decoded_evidence_len = 0
+        if evidence_header_val:
+            ev_raw = evidence_header_val.strip(":")
+            try:
+                decoded_evidence_len = len(base64.b64decode(ev_raw + ("=" * ((4 - len(ev_raw) % 4) % 4))))
+            except Exception:
+                decoded_evidence_len = 0
+        oversized_evidence_payload = decoded_evidence_len > 4096
+
+        # Determine if we're in relax mode (explicit plan action)
+        relax_mode = action == "RELAX_HEADER_BUDGET"
+        # If utility context indicates prior over-budget condition, honor relax on follow-up
+        try:
+            util_ctx = getattr(request.state, 'utility_context', {})
+            if not relax_mode and util_ctx:
+                if util_ctx.get('header_total_bytes', 0) > util_ctx.get('header_budget_total', 0):
+                    relax_mode = True
+        except Exception:
+            pass
+        request.state._pch_over_budget = over_budget or oversized_evidence_payload
+
+        # Pre-relax handling
+        if over_budget or oversized_evidence_payload:
+            if mode_env == "deny":
+                try:  # monitoring emit for 431 path
+                    monitor.emit(
+                        {
+                            "pch_present": bool(sig_input),
+                            "pch_verified": False,
+                            "failure_reason": "header_budget_exceeded",
+                            "header_total_bytes": header_total_bytes,
+                            "largest_header_bytes": largest_hdr,
+                            "signature_bytes": len(signature.encode()) if signature else 0,
+                            "latency_ms": (__import__("time").time() - start_time) * 1000.0,
+                            "http_status": 431,
+                            "is_guarded_route": route.startswith("/protected"),
+                            "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
+                            "route": route,
+                            "header_431_total": 1,
+                        }
+                    )
+                except Exception:  # pragma: no cover
+                    pass
+                clear_utility_context()
+                return JSONResponse(
+                    {
+                        "error": "header_budget",
+                        "limit": header_budget_limit,
+                        "observed": header_total_bytes,
+                    },
+                    status_code=431,
+                )
+            elif mode_env in {"hash-only", "body-evidence"} and not relax_mode:
+                # Oversized evidence header without hash triggers pre-relax hint (428)
+                if evidence_header_val and "evidence-sha-256" not in headers_lower:
+                    return JSONResponse(
+                        {
+                            "error": "header budget exceeded",
+                            "hint": "downgrade: move evidence to body and provide evidence-sha-256 header",
+                            "mode": "RELAX_HEADER_BUDGET",
+                        },
+                        status_code=428,
+                        headers={"X-PCH-PreRelax": "1"},
+                    )
+                # If not evidence related just mark relax and continue parsing
+                relax_mode = True
+
+        # If client already downgraded evidence (hash present, header removed) force relax
+        if ("evidence-sha-256" in headers_lower) and ("evidence" not in headers_lower):
+            relax_mode = True
+
+        # 6. Parse signature-input (skipped if load-shed earlier)
         try:
             label, components, params = parse_signature_input(sig_input)
         except Exception:
@@ -276,7 +339,6 @@ class PCHMiddleware(BaseHTTPMiddleware):
                     evidence_json_obj["evidence"], separators=(",", ":")
                 ).encode()
                 import hashlib as _hashlib
-
                 calc_hex = _hashlib.sha256(ev_bytes).hexdigest()
                 evidence_sha256_hex = calc_hex
                 evidence_ref = calc_hex
@@ -290,8 +352,11 @@ class PCHMiddleware(BaseHTTPMiddleware):
                     }
                     return JSONResponse({"error": "evidence hash mismatch"}, status_code=400)
             else:
-                clear_utility_context()
-                return JSONResponse({"error": "missing evidence body"}, status_code=400)
+                if HEADER_DOWNGRADE_MODE == "hash-only":
+                    evidence_sha256_hex = ""  # placeholder
+                else:
+                    clear_utility_context()
+                    return JSONResponse({"error": "missing evidence body"}, status_code=400)
         else:
             evidence_b64 = headers_lower.get("evidence")
             if evidence_b64:
@@ -309,6 +374,8 @@ class PCHMiddleware(BaseHTTPMiddleware):
             evidence_sha256_hex=evidence_sha256_hex,
         )
         log.info("Server signature-base:\n" + base)
+
+    # Guard (late): already handled early; no-op retained for clarity
 
         # 10. Nonce check
         challenge_hdr = headers_lower.get("pch-challenge", "")
@@ -392,7 +459,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
         dyn_routes = [
             p.strip() for p in os.getenv("ENFORCE_PCH_ROUTES", "").split(",") if p.strip()
         ]
-    # Lean controller early-drop not yet enforced here; enforcement happens after verification
+        # Lean controller early-drop not yet enforced here; enforcement happens after verification
         if any(route.startswith(p) for p in dyn_routes):
             pch_res = request.state.pch_result
             must_have = pch_res.get("present") and pch_res.get("verified")

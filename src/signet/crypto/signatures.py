@@ -6,6 +6,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 from .alg_registry import verify_alg
 from ..config import CLIENT_KEYS
+from ..pch.base_string import build_canonical_base
 import json
 import os
 
@@ -36,50 +37,11 @@ def parse_signature_input(header: str) -> Tuple[str, List[str], Dict[str, str]]:
     return label, comps, p
 
 def build_signature_base(request, components: List[str], params: Dict[str, str], evidence_sha256_hex: str) -> str:
-    # Minimal base: each line 'component: value' followed by '@signature-params'
-    lines = []
-    headers = {k.lower(): v for k, v in request.headers.items()}
-    for comp in components:
-        lc = comp.lower()
-        if lc == "@method":
-            val = request.method.upper()
-        elif lc == "@path":
-            path = request.url.path or "/"
-            query = request.url.query
-            val = path if not query else f"{path}?{query}"
-        elif lc == "@authority":
-            # Use exact Host header (includes port) for signature authority alignment
-            val = request.headers.get("host") or request.url.netloc or ""
-        elif lc == "content-digest":
-            val = headers.get("content-digest", "")
-        elif lc == "content-type":
-            val = headers.get("content-type", "")
-        elif lc == "pch-challenge":
-            val = headers.get("pch-challenge", "")
-        elif lc == "pch-channel-binding":
-            val = headers.get("pch-channel-binding", "")
-        elif lc == "evidence-sha-256":
-            val = evidence_sha256_hex
-        else:
-            # Generic header
-            val = headers.get(lc, "")
-        # Sanitize to guarantee single-line (fuzz may introduce newlines in path or headers)
-        if isinstance(val, str):
-            val = val.replace("\r", "").replace("\n", "")
-        lines.append(f"{lc}: {val}")
-    # @signature-params (simplified)
-    comp_list = " ".join([f'"{c}"' for c in components])
-    params_copy = {**params}
-    # normalize
-    created = params_copy.get("created") or str(int(time.time()))
-    keyid = params_copy.get("keyid", "")
-    alg = params_copy.get("alg", "ed25519")
-    # Use single quotes around the f-string so we can embed double quotes safely
-    sig_params = (
-        f"@signature-params: ({comp_list});created={created};keyid=\"{keyid}\";alg=\"{alg}\""
-    )
-    lines.append(sig_params)
-    return "\n".join(lines)
+    """Backward compatible wrapper that now delegates to canonical builder.
+
+    Centralization happens in pch.base_string.build_canonical_base.
+    """
+    return build_canonical_base(request, components, params, evidence_sha256_hex)
 
 def load_client_keys() -> Dict[str, Dict[str, str]]:
     if not os.path.exists(CLIENT_KEYS):

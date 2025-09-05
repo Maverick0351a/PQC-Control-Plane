@@ -67,7 +67,7 @@ class ReceiptStore:
                     "utility": pl.get("utility"),
                     # Enriched fields (v2 evidence)
                     "lat_ewma_ms_pqc": getattr(brk, 'lat_ewma_ms_pqc', getattr(brk, 'lat_ewma', 0.0)),
-                    "Wq_ms": getattr(brk, 'kingman_wq_ms', 0.0),  # alias; kingman_wq_ms retained above
+                    # (removed alias Wq_ms; use kingman_wq_ms consistently)
                     "reason_detail": reason_detail or None,
                 }
             except Exception:
