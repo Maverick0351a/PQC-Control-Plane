@@ -50,6 +50,9 @@ curl http://localhost:8080/metrics                # Prometheus text
 
 # 8) Grafana (login admin / admin)
 # http://localhost:3000  (Dashboard: "Signet PQC Control Plane")
+
+# (Optional) Install git hooks for auto-fix before committing
+pre-commit install
 ```
 
 ### Environment
@@ -217,6 +220,28 @@ Recommended next hardening steps:
 - Add container SBOM (e.g. `syft packages dir:./ -o cyclonedx-json`)
 - Generate SPDX + CycloneDX dual formats
 - Issue SLSA provenance using GitHub Actions OIDC + `cosign sign --identity` constraints
+
+---
+## Developer Workflow (Autofix Hooks)
+
+Ruff provides both formatting and linting. To enable pre-commit autofix:
+
+```bash
+pre-commit install
+```
+
+On commit the hooks will:
+1. Run `ruff-format` (idempotent formatter)
+2. Run `ruff` with `--fix` (safe fixes: imports, unused symbols)
+3. Normalize whitespace & line endings
+
+CI enforces formatting/lint cleanliness (`ruff format --check`, `ruff check --diff`).
+
+Manual make targets:
+```bash
+make fmt   # apply formatting + autofix
+make lint  # check only
+```
 
 ---
 *Stretch add-ons implemented: Helm chart, Hypothesis fuzz tests (JCS + signature base), gRPC prototype service, SBOM + minimal provenance.*

@@ -1,4 +1,4 @@
-.PHONY: install lint test run pack fmt
+.PHONY: install lint test run pack fmt hooks
 
 install:
 	python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
@@ -9,6 +9,10 @@ fmt:
 
 lint:
 	ruff check .
+
+hooks:
+	pre-commit install
+	@echo "Pre-commit hooks installed (ruff lint+format, whitespace)."
 
 test:
 	pytest -q --cov=src --cov-report=term-missing
