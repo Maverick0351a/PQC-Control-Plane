@@ -5,6 +5,7 @@ import hashlib
 import uuid
 import datetime
 from .model import EnforcementReceipt
+from .envelope import build_envelope
 from ..controller.state import load_state
 from ..controller.plan import plan
 from ..crypto.jcs import jcs_canonicalize
@@ -84,6 +85,29 @@ class ReceiptStore:
             request_ref=reqref,
             controller=controller_state,
         ).model_dump()
+
+        # Build new envelope v1 alongside legacy record (drop-in path)
+        try:
+            actor = {"service": os.getenv("SIGNET_SERVICE", "signet-api"), "cluster": os.getenv("SIGNET_CLUSTER", "dev-local")}
+            claims = {}
+            if controller_state:
+                claims["sndt"] = {
+                    "state": controller_state.get("breaker_state"),
+                    "ρ": round(controller_state.get("rho", 0.0), 4),
+                    "err_ewma": round(controller_state.get("err_ewma", 0.0), 6),
+                    "decision": controller_state.get("action"),
+                    "reason": controller_state.get("reason"),
+                }
+            if pch:
+                claims["cab"] = {
+                    "prov": "openssl",  # placeholder provider metadata
+                    "provider_ver": os.getenv("OPENSSL_VERSION", "unknown"),
+                    "fips_mode": False,
+                }
+            env_obj = build_envelope(actor=actor, claims=claims, exporter=None, exporter_type=None, sth_ref=None)
+            rec["envelope_v1"] = env_obj
+        except Exception:
+            pass
 
         path = self._date_path()
         prev = self._last_hash_b64(path)
