@@ -32,6 +32,7 @@ static_resources:
                   value: |
                     {"key_id":"demo-ed25519","ed25519_secret_b64":"","emit_record_header":false}
           # Native TLS exporter injector filter (prototype) - requires custom Envoy build with extension registered.
+          # Optionally fall back to Lua pseudo exporter if NATIVE_EXPORTER=0 (envsubst or manual edit required at deploy time)
           - name: envoy.filters.http.tls_exporter_injector
             typed_config:
               "@type": type.googleapis.com/udpa.type.v1.TypedStruct

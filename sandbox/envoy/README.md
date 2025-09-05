@@ -1,3 +1,12 @@
+## Integration Harness
+
+Run `./sandbox/envoy/run_integration.ps1` after starting docker-compose to exercise:
+1. Challenge issuance.
+2. TLS exporter injector (native prototype) → exporter consumed by WASM DPR signer (ekm_tag present).
+3. DPR signing headers.
+
+If `X-DPR-EKM-Tag` is present on response the channel binding path worked (exporter header existed).
+
 # Envoy TLS Exporter Sandbox
 
 This sandbox would provide a real RFC 9266 TLS exporter header `x-tls-exporter` used for channel binding.
