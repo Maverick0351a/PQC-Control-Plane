@@ -18,6 +18,19 @@ static_resources:
               - match: { prefix: "/" }
                 route: { cluster: app }
           http_filters:
+          # Optional DPR signer WASM filter (insert before Lua + router). Provide compiled module at /etc/envoy/wasm/dpr_signer.wasm
+          - name: envoy.filters.http.wasm
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+              config:
+                name: dpr_signer
+                vm_config:
+                  runtime: "envoy.wasm.runtime.v8"
+                  code: { local: { filename: "/etc/envoy/wasm/dpr_signer.wasm" } }
+                configuration:
+                  @type: type.googleapis.com/google.protobuf.StringValue
+                  value: |
+                    {"key_id":"demo-ed25519","ed25519_secret_b64":"","emit_record_header":false}
           - name: envoy.filters.http.lua
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
