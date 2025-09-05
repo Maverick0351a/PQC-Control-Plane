@@ -4,15 +4,19 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 var pub ed25519.PublicKey
+var leaves = make([][]byte, 0)
 
 func main() {
 	pkPath := os.Getenv("RECEIPT_PUBKEY_PEM")
@@ -39,8 +43,37 @@ func ingest(w http.ResponseWriter, r *http.Request) {
 	rawSig, err := base64.StdEncoding.DecodeString(sig)
 	if err != nil { http.Error(w, "bad sig b64", 400); return }
 	if !ed25519.Verify(pub, canon, rawSig) { http.Error(w, "signature invalid", 400); return }
-	// Merkle append placeholder
-	resp := map[string]any{"leaf_hash": "TODO", "sth_id": "TODO"}
+	// Append leaf and compute current root (simple in-memory Merkle)
+	lh := sha256.Sum256(canon)
+	leaves = append(leaves, lh[:])
+	root := merkleRoot(leaves)
+	resp := map[string]any{
+		"leaf_hash": hex.EncodeToString(lh[:]),
+		"sth_root": hex.EncodeToString(root),
+		"size": len(leaves),
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	}
 	w.Header().Set("content-type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// merkleRoot computes a SHA-256 binary tree root over the provided leaves.
+func merkleRoot(leaves [][]byte) []byte {
+	if len(leaves) == 0 { return nil }
+	layer := make([][]byte, len(leaves))
+	copy(layer, leaves)
+	for len(layer) > 1 {
+		next := make([][]byte, 0, (len(layer)+1)/2)
+		for i := 0; i < len(layer); i += 2 {
+			if i+1 == len(layer) {
+				next = append(next, layer[i])
+				break
+			}
+			concat := append(append([]byte{}, layer[i]...), layer[i+1]...)
+			h := sha256.Sum256(concat)
+			next = append(next, h[:])
+		}
+		layer = next
+	}
+	return layer[0]
 }

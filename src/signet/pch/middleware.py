@@ -364,7 +364,16 @@ class PCHMiddleware(BaseHTTPMiddleware):
                     return JSONResponse({"error": "evidence hash mismatch"}, status_code=400)
             else:
                 if HEADER_DOWNGRADE_MODE == "hash-only":
-                    evidence_sha256_hex = ""  # placeholder
+                    # Compute hash directly from body if JSON object with 'evidence' field is not provided
+                    try:
+                        if body_bytes:
+                            import hashlib as _hashlib
+                            evidence_sha256_hex = _hashlib.sha256(body_bytes).hexdigest()
+                            evidence_ref = evidence_sha256_hex
+                        else:
+                            evidence_sha256_hex = ""
+                    except Exception:
+                        evidence_sha256_hex = ""
                 else:
                     clear_utility_context()
                     return JSONResponse({"error": "missing evidence body"}, status_code=400)
