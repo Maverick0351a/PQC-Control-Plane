@@ -1,4 +1,4 @@
-import os
+"""Signature base normalization tests."""
 from fastapi.testclient import TestClient
 from src.signet.app import app
 

@@ -1,4 +1,3 @@
-import json
 from src.signet.cbom.export import build_cbom
 from src.signet.config import BINDING_TYPE
 

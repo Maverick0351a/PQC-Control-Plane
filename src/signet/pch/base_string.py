@@ -3,7 +3,7 @@
 Centralizes canonicalization of pseudo-header components used in PCH signing.
 Ensures stable base across ingress proxy chains (normal + impaired paths).
 """
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import time
 
 CANON_ORDER = ["@method", "@path", "@authority", "content-digest", "pch-challenge", "pch-channel-binding", "evidence-sha-256"]

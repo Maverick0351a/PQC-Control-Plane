@@ -1,10 +1,12 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Header budget guardrails
 MAX_HEADER_BYTES = int(os.getenv("MAX_HEADER_BYTES", "16384"))
 MAX_SINGLE_HEADER_BYTES = int(os.getenv("MAX_SINGLE_HEADER_BYTES", "8192"))
 HEADER_DOWNGRADE_MODE = os.getenv("HEADER_DOWNGRADE_MODE", "hash-only")  # hash-only|body-evidence|deny
-from dotenv import load_dotenv
-load_dotenv()
 
 FEATURE_PCH = os.getenv("FEATURE_PCH", "true").lower() == "true"
 PCH_ADVISORY = os.getenv("PCH_ADVISORY", "true").lower() == "true"

@@ -7,7 +7,6 @@ from importlib import metadata
 from ..config import (
     BINDING_TYPE,
     ENFORCE_PCH_ROUTES,
-    SERVER_SIGNING_KEY,
     CLIENT_KEYS,
     BINDING_HEADER,
 )
