@@ -42,4 +42,11 @@ src/signet/ingress/certs/*
 uvicorn.out
 uvicorn.err
 
+# Ephemeral debug / temp artifacts (cleaned up)
+tmp_metrics_inspect.py
+tmp_util_inspect.py
+debug_plan.py
+debug_relax.py
+tmp_pack/
+
 # Platform normalization (recommend adding .gitattributes with text=auto)
