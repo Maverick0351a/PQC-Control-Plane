@@ -7,7 +7,8 @@ Features:
 * HKDF (SHA-256) derived `ekm_tag` from channel binding exporter bytes.
 * JSON Canonicalized (simple stable ser) DPR record and Ed25519 signature.
 * Emits response headers: `x-dpr-signature`, `x-dpr-keyid`, `x-dpr-record` (optional), `x-dpr-ekm-tag`, `x-dpr-hmac`.
-* Host metrics counter: `dpr_signer.records`.
+* Metrics counters: `dpr_signer.records`, `dpr_signer.req_bytes`, `dpr_signer.rsp_bytes`, `dpr_signer.sig_missing`, `dpr_signer.ephemeral_keys`.
+* Ephemeral key generation (if `generate_if_missing=true` and no key material configured) – exposes base64 keypair via `x-dpr-ephemeral-key` response header for bootstrap/demo.
 
 #### Build (Rust + wasm32)
 ```bash
@@ -29,7 +30,7 @@ cp target/wasm32-unknown-unknown/release/dpr_signer.wasm ../../dpr_signer.wasm
                 configuration:
                   @type: type.googleapis.com/google.protobuf.StringValue
                   value: |
-                    {"key_id":"demo-ed25519","ed25519_secret_b64":"<base64 64B keypair bytes>","tenant_pepper":"pepper123","emit_record_header":false}
+                    {"key_id":"demo-ed25519","ed25519_secret_b64":"<base64 64B keypair bytes>","tenant_pepper":"pepper123","emit_record_header":false,"generate_if_missing":true}
 ```
 
 Note: Direct TLS exporter access is not available in proxy-wasm; upstream filter must inject exporter value.
