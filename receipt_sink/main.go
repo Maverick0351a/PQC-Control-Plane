@@ -18,6 +18,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/pflag"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // DPRRecord mirrors the JSON produced by the WASM signer (subset needed for indexing)
@@ -54,6 +56,7 @@ type merkleBatcher struct {
 	leaves  [][]byte
 	lastSTH *STH
 	interval time.Duration
+	lastFlush time.Time
 }
 
 type STH struct {
@@ -90,6 +93,7 @@ func (m *merkleBatcher) flush() {
 	sth := &STH{Size: len(m.leaves), RootHash: hex.EncodeToString(root), Timestamp: time.Now().Unix()}
 	m.lastSTH = sth
 	m.leaves = nil
+	m.lastFlush = time.Now()
 }
 
 func buildMerkleRoot(leaves [][]byte) []byte {
@@ -247,6 +251,19 @@ func main() {
 
 	batcher := newBatcher(time.Minute)
 
+	// Metrics
+	dprTotal := prometheus.NewCounter(prometheus.CounterOpts{Name:"dpcp_dpr_total", Help:"Total DPR records ingested"})
+	ekmAvail := prometheus.NewCounter(prometheus.CounterOpts{Name:"dpcp_ekm_present_total", Help:"DPRs with ekm_tag present"})
+	bytesHashed := prometheus.NewCounter(prometheus.CounterOpts{Name:"dpcp_bytes_hashed_total", Help:"Total bytes counted toward hashing (req+rsp)"})
+	sthLag := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name:"dpcp_sth_age_seconds", Help:"Seconds since last STH flush"}, func() float64 {
+		if batcher.lastFlush.IsZero() {
+			return 0
+		}
+		return time.Since(batcher.lastFlush).Seconds()
+	})
+	exposureGauge := prometheus.NewGauge(prometheus.GaugeOpts{Name:"dpcp_top_exposure_first", Help:"Exposure count of top dataset (debug)"})
+	prometheus.MustRegister(dprTotal, ekmAvail, bytesHashed, sthLag, exposureGauge)
+
 	http.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost { http.Error(w, "method", http.StatusMethodNotAllowed); return }
 		var req IngestRequest
@@ -256,6 +273,10 @@ func main() {
 		corr, _ := deriveCorrKey(req.Record.EKMTag, req.Record.CB)
 		leaf := mustJSON(req.Record)
 		leafHash, sth := batcher.add(leaf)
+		// simplistic bytes hashed approximation: length of leaf JSON (req+rsp already hashed upstream)
+		bytesHashed.Add(float64(len(leaf)))
+		dprTotal.Inc()
+		if req.Record.EKMTag != "" { ekmAvail.Inc() }
 		if err := store.insert(req.Record, req.SigB64, req.KeyID, leafHash, corr); err != nil { log.Printf("insert err: %v", err); http.Error(w, "store", 500); return }
 		resp := IngestResponse{Status: "ok", LeafHash: leafHash, STH: sth}
 		w.Header().Set("content-type", "application/json")
@@ -281,10 +302,17 @@ func main() {
 		lim := 10
 		if q := r.URL.Query().Get("limit"); q != "" { if v, err := strconv.Atoi(q); err==nil { lim = v } }
 		var rows []FVarRow
-		if s, ok := store.(*sqliteStore); ok { var err error; rows, err = s.topFvar(lim); if err != nil { http.Error(w, "query", 500); return } }
+		if s, ok := store.(*sqliteStore); ok {
+			var err error
+			rows, err = s.topFvar(lim)
+			if err != nil { http.Error(w, "query", 500); return }
+			if len(rows) > 0 { exposureGauge.Set(float64(rows[0].Exposure)) }
+		}
 		w.Header().Set("content-type", "application/json")
 		json.NewEncoder(w).Encode(rows)
 	})
+
+	http.Handle("/metrics", promhttp.Handler())
 
 	log.Printf("receipt sink listening on %s (backend=%s)", bind, backend)
 	log.Fatal(http.ListenAndServe(bind, nil))
