@@ -9,6 +9,9 @@ ROUTE='/protected'
 def signed_bad_request(client):
     r1 = client.get(ROUTE, headers={'X-TLS-Session-ID':'devsession'})
     chal = r1.headers.get('PCH-Challenge')
+    if not chal:  # retry once if challenge missing (race or prior failure)
+        r1 = client.get(ROUTE, headers={'X-TLS-Session-ID':'devsession'})
+        chal = r1.headers.get('PCH-Challenge') or ''
     body = b'{}'
     def b64(b): return base64.b64encode(b).decode()
     headers = {

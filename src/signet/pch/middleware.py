@@ -18,8 +18,17 @@ from ..controller.plan import (
     set_utility_context,
     clear_utility_context,
     plan as breaker_plan,
+    record_load_shed,
 )
-from ..controller.shield import shield, shield_outcome
+from ..controller.config import load_config
+from ..controller.state import (
+    load_state,
+    update_error_ewma,
+    update_latency_ewma,
+    update_queue_stats,
+    BreakerState,
+)
+from ..controller.plan import plan_action
 from ..crypto.digest import parse_content_digest
 from ..crypto.signatures import (
     parse_signature_input,
@@ -77,11 +86,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
         )
 
         dynamic_breaker_enabled = os.getenv("BREAKER_ENABLED", "false").lower() == "true"
-        if dynamic_breaker_enabled:
-            sh_early = shield(route)
-            if isinstance(sh_early, JSONResponse):
-                if sig_input or signature:
-                    return sh_early
+        cfg = load_config() if dynamic_breaker_enabled else None
 
         # 3. Utility context (header budget projection)
         try:
@@ -97,6 +102,25 @@ class PCHMiddleware(BaseHTTPMiddleware):
 
         current_plan = breaker_plan(route)
         action = current_plan.get("action")
+        # Load-shed path: if breaker is OPEN or plan reason indicates safety gate/utility fallback
+        if dynamic_breaker_enabled and current_plan.get("state") == BreakerState.OPEN.value:
+            st = load_state(route)
+            record_load_shed(route, st, "breaker_open")
+            clear_utility_context()
+            # Fast classic fallback response (advisory) – no signature verification performed
+            return JSONResponse(
+                {"error": "pch load-shed", "reason": "breaker_open", "state": "Open"},
+                status_code=503,
+            )
+        if dynamic_breaker_enabled and current_plan.get("reason") in {"safety_both_violated", "safety_availability", "safety_header_budget_exceeded", "utility_fallback"}:
+            st = load_state(route)
+            record_load_shed(route, st, current_plan.get("reason") or "load_shed")
+            clear_utility_context()
+            # Return 200 classic pass-through (no PCH) but annotate advisory header
+            request.state.pch_result = {"present": False, "verified": False, "failure_reason": "load_shed"}
+            resp = await call_next(request)
+            resp.headers["X-PCH-LoadShed"] = current_plan.get("reason") or "load_shed"
+            return resp
 
         # 4. Challenge (missing signature artifacts)
         public_paths = {"/__health", "/__metrics", "/cbom.json", "/echo/headers"}
@@ -106,7 +130,6 @@ class PCHMiddleware(BaseHTTPMiddleware):
             # Skip PCH processing entirely for public informational endpoints
             clear_utility_context()
             return await call_next(request)
-
         if not sig_input or not signature:
             nonce = nonce_store.issue(route=route, client_ip=client_ip, tls_id=tls_id or "dev")
             challenge_val = f":{nonce}:"
@@ -156,9 +179,10 @@ class PCHMiddleware(BaseHTTPMiddleware):
             # Intentionally DO NOT clear utility context here; relaxed follow-up may rely on it
             return JSONResponse({"error": "PCH required"}, status_code=status, headers=challenge_headers)
 
-        # 5. Header budget & relax-mode pre-check
+        # 5. Header budget & relax-mode pre-check (use config header_budget_max if breaker enabled)
         header_total_bytes = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
-        over_budget = header_total_bytes > HEADER_BUDGET_LIMIT
+        header_budget_limit = cfg.header_budget_max if cfg else HEADER_BUDGET_LIMIT
+        over_budget = header_total_bytes > header_budget_limit
         relax_mode = action == "RELAX_HEADER_BUDGET"
         if not relax_mode and "evidence-sha-256" in headers_lower and "evidence" not in headers_lower:
             # Heuristic: client adapted to relaxed mode (body evidence) even if current plan recomputed to normal
@@ -175,10 +199,36 @@ class PCHMiddleware(BaseHTTPMiddleware):
                 status_code=428,
             )
         if over_budget and not relax_mode:
+            try:
+                monitor.emit(
+                    {
+                        "pch_present": bool(sig_input),
+                        "pch_verified": False,
+                        "failure_reason": "header_budget_exceeded",
+                        "header_total_bytes": header_total_bytes,
+                        "largest_header_bytes": max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0),
+                        "signature_bytes": len(signature.encode()) if signature else 0,
+                        "latency_ms": (__import__("time").time() - start_time) * 1000.0,
+                        "http_status": 431,
+                        "is_guarded_route": route.startswith("/protected"),
+                        "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
+                        "route": route,
+                        "header_431_total": 1,
+                    }
+                )
+            except Exception:  # pragma: no cover
+                pass
             clear_utility_context()
-            return JSONResponse({"error": "headers too large"}, status_code=431)
+            return JSONResponse(
+                {
+                    "error": "headers too large",
+                    "budget": header_budget_limit,
+                    "got": header_total_bytes,
+                },
+                status_code=431,
+            )
 
-        # 6. Parse signature-input
+    # 6. Parse signature-input (skipped if load-shed earlier)
         try:
             label, components, params = parse_signature_input(sig_input)
         except Exception:
@@ -342,10 +392,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
         dyn_routes = [
             p.strip() for p in os.getenv("ENFORCE_PCH_ROUTES", "").split(",") if p.strip()
         ]
-        if dynamic_breaker_enabled:
-            sh = shield(route)
-            if isinstance(sh, JSONResponse):  # breaker opened mid-flight
-                return sh
+    # Lean controller early-drop not yet enforced here; enforcement happens after verification
         if any(route.startswith(p) for p in dyn_routes):
             pch_res = request.state.pch_result
             must_have = pch_res.get("present") and pch_res.get("verified")
@@ -377,7 +424,34 @@ class PCHMiddleware(BaseHTTPMiddleware):
         latency_ms = (__import__("time").time() - start_time) * 1000.0
         try:  # legacy monitor JSON aggregation
             if dynamic_breaker_enabled:
-                shield_outcome(route, bool(pch_res.get("verified")))
+                # Update lean controller state metrics per outcome
+                st = load_state(route)
+                now_ts = __import__("time").time()
+                service_ms = latency_ms
+                is_pqc = True  # all guarded routes treated as PQC attempt for now
+                update_queue_stats(st, now_ts, service_ms)
+                update_latency_ewma(st, service_ms)
+                failed = not bool(pch_res.get("verified")) or (500 <= response.status_code < 600)
+                update_error_ewma(st, is_pqc, failed)
+                if not failed:
+                    st.consecutive_successes += 1
+                else:
+                    st.consecutive_successes = 0
+                # Re-plan post-outcome (for next request visibility)
+                act, ns, rat = plan_action(
+                    {"header_total_bytes": hdr_total, "ewma_5xx": 0.0}, cfg, st
+                ) if cfg else (action, st.state, {})
+                st.state = ns
+                # Augment existing plan snapshot fields for Prometheus update
+                current_plan.update(
+                    {
+                        "action": act,
+                        "state": st.state.value,
+                        "err_ewma": st.err_ewma_pqc,
+                        "rho": st.rho,
+                        "kingman_wq_ms": st.wq_ms,
+                    }
+                )
             largest_hdr = max(
                 (len(k) + len(v) + 4 for k, v in request.headers.items()), default=0
             )

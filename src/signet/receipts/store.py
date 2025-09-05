@@ -43,24 +43,42 @@ class ReceiptStore:
         try:
             brk = load_state(request.url.path)
             pl = plan(request.url.path)
-            controller_state = {
-                "breaker_state": brk.name,
-                "err_ewma": brk.err_ewma,
-                "kingman_wq_ms": brk.kingman_wq_ms,
-                "rho": brk.rho_est,
-                "consecutive_successes": brk.consecutive_successes,
-                "action": pl.get("action"),
-                "reason": pl.get("reason"),
-                "deadband": pl.get("deadband"),
-                "utility": pl.get("utility"),
-            }
+            controller_state = None
+            try:
+                # Derive structured reason detail (gate vs utility) while preserving legacy flat reason
+                reason = pl.get("reason")
+                gate_reasons = {"safety_both_violated", "safety_header_budget_exceeded", "safety_availability"}
+                util_reasons = {"utility_fallback", "utility_attempt"}
+                reason_detail = {}
+                if reason in gate_reasons:
+                    reason_detail["gate"] = reason
+                if reason in util_reasons:
+                    reason_detail["util"] = reason
+                controller_state = {
+                    # Legacy keys (tests rely on these)
+                    "breaker_state": brk.name,
+                    "err_ewma": getattr(brk, 'err_ewma', getattr(brk, 'err_ewma_pqc', 0.0)),
+                    "kingman_wq_ms": getattr(brk, 'kingman_wq_ms', 0.0),
+                    "rho": getattr(brk, 'rho_est', getattr(brk, 'rho', 0.0)),
+                    "consecutive_successes": getattr(brk, 'consecutive_successes', 0),
+                    "action": pl.get("action"),
+                    "reason": reason,
+                    "deadband": pl.get("deadband"),
+                    "utility": pl.get("utility"),
+                    # Enriched fields (v2 evidence)
+                    "lat_ewma_ms_pqc": getattr(brk, 'lat_ewma_ms_pqc', getattr(brk, 'lat_ewma', 0.0)),
+                    "Wq_ms": getattr(brk, 'kingman_wq_ms', 0.0),  # alias; kingman_wq_ms retained above
+                    "reason_detail": reason_detail or None,
+                }
+            except Exception:
+                controller_state = None
         except Exception:
             controller_state = None
 
         rec = EnforcementReceipt(
             id=str(uuid.uuid4()),
             decision=decision,
-            reason=reason,
+            reason=reason or "",
             pch=pch,
             prev_receipt_hash_b64=None,
             request_ref=reqref,

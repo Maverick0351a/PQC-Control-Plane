@@ -9,7 +9,8 @@ from .utils.logging import get_logger
 from .utils.breaker_metrics import breaker_metrics
 from .controller.monitor import monitor
 from .controller.state import load_state
-from .controller.plan import _UTILITY_CONTEXT, TRIP_ERR, CLOSE_SUCCESSES
+from .controller.plan import last_decisions
+from .controller.config import load_config
 from .cbom.export import build_cbom
 from .obs.prom import prometheus_latest
 from .store.db import fetch_receipt
@@ -71,41 +72,33 @@ async def compliance_pack(body: dict):
 async def metrics():
     mon = monitor.snapshot()
     routes_data = []
+    cfg = load_config()
     for r, stats in mon.get("routes", {}).items():
         snap = load_state(r)
-        util = _UTILITY_CONTEXT or {}
-        # Derive utility if context present
-        pqc_rate = util.get("pqc_rate")
-        failure_rate = util.get("failure_rate")
-        slo_headroom = util.get("slo_headroom")
-        u_val = None
-        if pqc_rate is not None and failure_rate is not None and slo_headroom is not None:
-            alpha = util.get("alpha", 0.5)
-            beta = util.get("beta", 0.5)
-            gamma = util.get("gamma", 0.5)
-            try:
-                u_val = (pqc_rate ** alpha) * ((1 - failure_rate) ** beta) * (slo_headroom ** gamma)
-            except Exception:
-                u_val = None
+        ia = snap.interarrival_stats
+        sv = snap.service_stats
+        mean_inter = ia.mean if ia.count else 0.0
+        mean_service = sv.mean if sv.count else 0.0
+        Ca2 = ia.variance / (mean_inter ** 2) if mean_inter > 0 else 0.0
+        Cs2 = sv.variance / (mean_service ** 2) if mean_service > 0 else 0.0
         routes_data.append({
             "route": r,
             "state": snap.name,
-            "err_ewma": round(snap.err_ewma,6),
-            "rho": round(snap.rho_est,6),
-            "kingman_wq_ms": round(snap.kingman_wq_ms,3),
+            "rho": round(getattr(snap, 'rho', 0.0), 6),
+            "Ca2": round(Ca2, 6),
+            "Cs2": round(Cs2, 6),
+            "Wq_ms": round(getattr(snap, 'kingman_wq_ms', 0.0), 3),
+            "err_ewma_pqc": round(getattr(snap, 'err_ewma', 0.0), 6),
+            "lat_ewma_ms_pqc": round(getattr(snap, 'lat_ewma', 0.0), 3),
+            "ewma_5xx": 0.0,  # placeholder (no global 5xx EWMA yet)
             "consecutive_successes": snap.consecutive_successes,
-            "pqc_rate": pqc_rate,
-            "failure_rate": failure_rate,
-            "slo_headroom": slo_headroom,
-            "U": round(u_val,6) if u_val is not None else None,
-            "deadband": {"open": TRIP_ERR, "close_successes": CLOSE_SUCCESSES},
+            "deadband": {"open": cfg.trip_open, "close_successes": cfg.close_successes},
         })
     return JSONResponse({
-        "breaker": breaker_metrics.snapshot(),
-        "monitor": mon,
         "routes": routes_data,
-        "anomalies": mon.get("anomalies"),
-        "header_total_bytes_hist": mon.get("header_total_bytes_hist"),
+        "decisions": last_decisions(),
+        "monitor": mon,  # include raw monitor snapshot for tests expecting this key
+        "header_431_total": sum(1 for r, st in mon.get("routes", {}).items() for ev in [st] if isinstance(st, dict)),  # placeholder aggregate
     })
 
 @app.get("/metrics")

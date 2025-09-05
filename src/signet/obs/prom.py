@@ -4,7 +4,7 @@ Exports a registry and helper functions the middleware can call after each reque
 Keeps labels minimal to avoid cardinality explosion (route only; reasons collapsed where needed).
 """
 from __future__ import annotations
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from prometheus_client import (
     CollectorRegistry,
     Counter,
