@@ -2,7 +2,7 @@ import datetime
 import importlib.util
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from importlib import metadata
 from ..config import (
     BINDING_TYPE,
@@ -33,6 +33,12 @@ def _libcrypto_version() -> str:
 
 def _oqs_present() -> bool:
     return importlib.util.find_spec('oqs') is not None
+
+def _pkg_version(name: str) -> Optional[str]:
+    try:
+        return metadata.version(name)
+    except Exception:
+        return None
 
 def _app_version() -> str:
     try:
@@ -80,23 +86,90 @@ def _detect_crypto_components() -> List[Dict[str, Any]]:
 
 
 def _cbom_extensions(clients: Dict[str, Any]) -> Dict[str, Any]:
-    # algorithms extension: only primitives actively used now
+    # providers (crypto backends)
+    providers = [
+        {
+            "bom-ref": "prov-openssl",
+            "name": "OpenSSL",
+            "version": _libcrypto_version(),
+        }
+    ]
+    # loaded modules (python crypto bindings)
+    modules = [
+        {
+            "bom-ref": "mod-pyca-cryptography",
+            "name": "cryptography",
+            "version": _pkg_version("cryptography") or "unknown",
+        }
+    ]
+    if _oqs_present():
+        modules.append({
+            "bom-ref": "mod-liboqs",
+            "name": "oqs",
+            "version": _pkg_version("oqs") or "unknown",
+        })
+        providers.append({
+            "bom-ref": "prov-liboqs",
+            "name": "liboqs",
+            "version": "unknown",
+        })
+
+    # algorithms extension: primitives in use with parameterSetIdentifier and provider refs
     algorithms = [
         {
+            "bom-ref": "alg-ed25519",
             "primitive": "sig",
             "name": "ed25519",
+            "parameterSetIdentifier": "Ed25519",
             "params": {"keySize": 256, "variant": "Ed25519"},
-            "provider": {"name": "openssl", "version": _libcrypto_version()},
-            "certification": {"fips": False},
+            "provider": {"ref": "prov-openssl"},
         },
         {
+            "bom-ref": "alg-sha-256",
             "primitive": "hash",
             "name": "sha-256",
+            "parameterSetIdentifier": "SHA-256",
             "params": {"outputSize": 256},
-            "provider": {"name": "openssl", "version": _libcrypto_version()},
-            "certification": {"fips": False},
+            "provider": {"ref": "prov-openssl"},
+        },
+        {
+            "bom-ref": "alg-x25519",
+            "primitive": "kex",
+            "name": "x25519",
+            "parameterSetIdentifier": "X25519",
+            "provider": {"ref": "prov-openssl"},
+        },
+        {
+            "bom-ref": "alg-aes-128-gcm",
+            "primitive": "aead",
+            "name": "aes-128-gcm",
+            "parameterSetIdentifier": "AES-128-GCM",
+            "provider": {"ref": "prov-openssl"},
+        },
+        {
+            "bom-ref": "alg-aes-256-gcm",
+            "primitive": "aead",
+            "name": "aes-256-gcm",
+            "parameterSetIdentifier": "AES-256-GCM",
+            "provider": {"ref": "prov-openssl"},
+        },
+        {
+            "bom-ref": "alg-chacha20-poly1305",
+            "primitive": "aead",
+            "name": "chacha20-poly1305",
+            "parameterSetIdentifier": "CHACHA20-POLY1305",
+            "provider": {"ref": "prov-openssl"},
         },
     ]
+    # Optionally include a KEM for PQ experiments
+    if any(p.get("bom-ref") == "prov-liboqs" for p in providers):
+        algorithms.append({
+            "bom-ref": "alg-ml-kem-512",
+            "primitive": "kem",
+            "name": "ml-kem",
+            "parameterSetIdentifier": "ML-KEM-512",
+            "provider": {"ref": "prov-liboqs"},
+        })
     # keys (only server STH signing key surfaced minimally)
     keys = [
         {
@@ -106,9 +179,43 @@ def _cbom_extensions(clients: Dict[str, Any]) -> Dict[str, Any]:
             "lifecycle": "active",
         }
     ]
-    # protocols (channel binding)
+    # protocols (channel binding) + active TLS 1.3 cipher suites
     protocols = [
-        {"type": "tls", "version": "1.3", "binding": BINDING_TYPE}
+        {
+            "bom-ref": "proto-tls13-default",
+            "type": "tls",
+            "version": "1.3",
+            "binding": BINDING_TYPE,
+            "cipherSuites": [
+                {
+                    "bom-ref": "cs-tls-aes128gcm-sha256",
+                    "ianaName": "TLS_AES_128_GCM_SHA256",
+                    "kex": "x25519",
+                    "sig": "ed25519",
+                    "aead": "aes-128-gcm",
+                    "hash": "sha-256",
+                    "active": True,
+                },
+                {
+                    "bom-ref": "cs-tls-chacha20poly1305-sha256",
+                    "ianaName": "TLS_CHACHA20_POLY1305_SHA256",
+                    "kex": "x25519",
+                    "sig": "ed25519",
+                    "aead": "chacha20-poly1305",
+                    "hash": "sha-256",
+                    "active": True,
+                },
+                {
+                    "bom-ref": "cs-tls-aes256gcm-sha384",
+                    "ianaName": "TLS_AES_256_GCM_SHA384",
+                    "kex": "x25519",
+                    "sig": "ed25519",
+                    "aead": "aes-256-gcm",
+                    "hash": "sha-384",
+                    "active": True,
+                },
+            ],
+        }
     ]
     # http signature shape used by PCH
     http_sig = [
@@ -123,6 +230,8 @@ def _cbom_extensions(clients: Dict[str, Any]) -> Dict[str, Any]:
         "cbom:protocols": protocols,
         "cbom:http_sig": http_sig,
         "cbom:clients": list(clients.keys()),
+        "cbom:providers": providers,
+        "cbom:modules": modules,
     }
 
 
@@ -160,8 +269,9 @@ def build_cbom() -> Dict[str, Any]:
             {"name": "binding.type", "value": BINDING_TYPE},
             {"name": "enforced.routes", "value": ",".join(ENFORCE_PCH_ROUTES) if ENFORCE_PCH_ROUTES else ""},
         ],
-        "dependencies": [  # simple dependency edges (service depends on alg + library)
-            {"ref": "svc-signet-api", "dependsOn": [c["bom-ref"] for c in components if c.get("bom-ref") and c["bom-ref"].startswith("alg-") or c["bom-ref"].startswith("lib-")]},
+        "dependencies": [
+            # Link protocol config to algorithms it relies on
+            {"ref": "proto-tls13-default", "dependsOn": [a["bom-ref"] for a in extensions["cbom:algorithms"]]},
         ],
     }
     # Merge CBOM extension objects under top-level for simplicity (namespaced keys ok in JSON)
