@@ -9,19 +9,17 @@ services:
       - DATA_DIR=/app/var/data
       - SERVER_SIGNING_KEY=/app/keys/sth_ed25519_sk.pem
       - CLIENT_KEYS=/app/config/clients.json
-  # Enable TLS exporter channel binding end-to-end (Envoy injects x-tls-exporter)
-  - BINDING_TYPE=tls-exporter
-  - BINDING_HEADER=X-TLS-Exporter
-  # Enforce presence of exporter (deny if missing)
-  - REQUIRE_TLS_EXPORTER=true
+      # Enable TLS exporter channel binding end-to-end (Envoy injects x-tls-exporter)
+      - BINDING_TYPE=tls-exporter
+      - BINDING_HEADER=X-TLS-Exporter
+      # Enforce presence of exporter (deny if missing)
+      - REQUIRE_TLS_EXPORTER=true
     depends_on:
       - redis
     ports:
       - "8080:8080"
     volumes:
-      # Mount signing keys (private + public) read-only so we can rotate/regenerate without rebuilding image
       - ./keys:/app/keys:ro
-      # Mount client key registry / config mapping
       - ./config:/app/config:ro
 
   redis:
