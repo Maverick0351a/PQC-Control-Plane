@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\controller\shield.py
+# hypothesis_version: 6.138.14
+
+[0.0, 0.2, 1.0, 503, '-d', '-f', '5', 'FALLBACK_CLASSIC', 'PROBE_HALF_OPEN', 'RELAX_HEADER_BUDGET', 'Retry-After', 'THROTTLE_PCH', 'action', 'allow', 'binding_type', 'cfg', 'controller', 'data.signet.shield', 'enforce_allowed', 'error', 'eval', 'ewma_5xx', 'expressions', 'fallback', 'high_5xx_rate', 'high_5xx_rate_rego', 'json', 'obs', 'opa', 'policy', 'pqc_breaker_open', 'require_tls_exporter', 'result', 'safety', 'shield.rego', 'thresholds', 'tls-exporter', 'trip_open', 'value']

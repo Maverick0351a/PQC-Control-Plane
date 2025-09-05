@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\crypto\signatures.py
+# hypothesis_version: 6.138.14
+
+['"', '(', ')', '/', ';', '=', '@authority', '@method', '@path', 'alg', 'content-digest', 'content-type', 'created', 'ed25519', 'evidence-sha-256', 'host', 'keyid', 'pch-challenge', 'pch-channel-binding', 'r', 'utf-8']

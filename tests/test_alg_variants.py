@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 import time
 import pytest
 from starlette.testclient import TestClient
@@ -8,8 +7,8 @@ from cryptography.hazmat.primitives import serialization
 from src.signet.app import app
 from src.signet.crypto.signatures import build_signature_base
 
-try:
-    import oqs  # type: ignore
+try:  # Attempt to detect pyoqs
+    __import__("oqs")  # type: ignore
     HAS_PQC = True
 except Exception:
     HAS_PQC = False
@@ -22,7 +21,8 @@ def _issue_challenge(client):
 
 
 def _post_signed(client, alg: str, keyid: str, sig_b64: str, created: str, body: bytes, chal: str):
-    b64 = lambda b: base64.b64encode(b).decode()
+    def b64(b: bytes) -> str:
+        return base64.b64encode(b).decode()
     headers = {
         "content-digest": f"sha-256=:{b64(__import__('hashlib').sha256(body).digest())}:",
         "content-type": "application/json",
@@ -32,7 +32,7 @@ def _post_signed(client, alg: str, keyid: str, sig_b64: str, created: str, body:
     }
     comps = ["@method","@path","@authority","content-digest","pch-challenge","pch-channel-binding"]
     params = {"created": created, "keyid": keyid, "alg": alg}
-    base = build_signature_base(
+    _ = build_signature_base(
         request=client.build_request("POST","/protected",headers=headers),
         components=comps,
         params=params,
@@ -50,7 +50,8 @@ def test_alg_ed25519_ok():
     body = b'{"demo":true}'
     created = str(int(time.time()))
     # Build base to sign
-    b64f = lambda b: base64.b64encode(b).decode()
+    def b64f(b: bytes) -> str:
+        return base64.b64encode(b).decode()
     headers_tmp = {
         "content-digest": f"sha-256=:{b64f(__import__('hashlib').sha256(body).digest())}:",
         "content-type": "application/json",

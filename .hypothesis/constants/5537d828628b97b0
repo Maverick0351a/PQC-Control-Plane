@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\pytest_metadata\plugin.py
+# hypothesis_version: 6.138.2
+
+['--metadata', '--metadata-from-json', 'Packages', 'Platform', 'Plugins', 'Python', 'additional metadata.', 'append', 'key', 'metadata', 'metadata: {0}', 'metadata_from_json', 'pluggy', 'pytest', 'pytest-', 'pytest-metadata', 'r', 'session', 'store', 'value', 'verbose', 'workeroutput', '{}']

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: signet
+version: 0.1.0
+description: Signet PQC Control Plane MVP
+appVersion: "0.1.0"

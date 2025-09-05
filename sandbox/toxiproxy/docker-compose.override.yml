@@ -1,0 +1,22 @@
+services:
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports:
+      - "8474:8474"   # API
+      - "18080:18080" # exposed proxy
+    command: -host=0.0.0.0
+    healthcheck:
+      test: ["CMD", "toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  envoy:
+    depends_on:
+      - toxiproxy
+    environment:
+      - UPSTREAM_HOST=toxiproxy
+    # override cluster address via extra_hosts or separate envoy config if needed
+
+# Instructions:
+# docker compose -f docker-compose.yml -f sandbox/toxiproxy/docker-compose.override.yml up -d

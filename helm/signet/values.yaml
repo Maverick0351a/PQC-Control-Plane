@@ -1,0 +1,60 @@
+image:
+  repository: signet-pqc
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  FEATURE_PCH: "true"
+  PCH_ADVISORY: "true"
+  BREAKER_ENABLED: "false"
+  REQUIRE_TLS_EXPORTER: "false"
+
+resources: {}
+
+controllerConfig: |
+  weights:
+    alpha: 0.45
+    beta: 0.35
+    gamma: 0.20
+  thresholds:
+    trip_open: 0.25
+    close_successes: 10
+    cooldown_sec: 20
+  slo:
+    target_p50_ms: 100
+    target_p95_ms: 300
+  header_budget:
+    max_total_bytes: 12000
+    max_single_header_bytes: 8000
+    max_signature_bytes: 5000
+  safety:
+    availability_floor_5xx_ewma: 0.05
+    require_tls_exporter: false
+  binding:
+    type: tls-session-id
+  guard:
+    enforce_routes:
+      - /protected
+
+regoPolicy: |
+  package signet.shield
+  default allow = false
+  allow {
+    input.cfg.safety.require_tls_exporter == false
+  }
+  allow {
+    input.obs.binding_type == "tls-exporter"
+  }
+  fallback {
+    input.obs.ewma_5xx > input.cfg.safety.availability_floor_5xx_ewma
+  }
+  enforce_allowed {
+    allow
+    not fallback
+  }

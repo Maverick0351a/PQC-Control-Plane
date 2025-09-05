@@ -1,0 +1,17 @@
+syntax = "proto3";
+package signet;
+
+service Protected {
+  rpc Call(ProtectedRequest) returns (ProtectedReply) {}
+}
+
+message ProtectedRequest {
+  string message = 1;
+}
+
+message ProtectedReply {
+  bool ok = 1;
+  string receipt_id = 2;
+  bool pch_verified = 3;
+  string failure_reason = 4;
+}

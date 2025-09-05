@@ -1,4 +1,4 @@
-# Signet PQC Control Plane — MVP (PCH‑Lite + Receipts + Merkle STH)
+# Signet PQC Control Plane — MVP (PCH‑Lite + PQC + Relax Header Budget + Receipts + Merkle STH)
 
 **Policy → Enforcement → Proof.** This MVP implements an HTTP‑layer, standards‑aligned Proof‑Carrying Handshake (PCH‑Lite) using **HTTP Message Signatures (RFC 9421)** + **Content‑Digest (RFC 9530)**, attached to a control‑theoretic enforcement plane that emits **verifiable receipts** and batches them into a **Merkle log** with **Signed Tree Heads (STHs)**.
 
@@ -7,12 +7,15 @@
 ## Features
 
 - **PCH‑Lite (advisory)**: 401 challenge + Redis nonce; client signs a RFC‑9421 base over selected components (`@method`, `@path`, `@authority`, `content-digest`, `pch-challenge`, `pch-channel-binding`, `evidence-sha-256`). Server verifies signature and binding; result attached to receipts.
+- **Algorithm Agility (Classical + PQC + Hybrid)**: Supports `ed25519`, `ml-dsa-65` (Dilithium3 via optional liboqs), and hybrid `ecdsa-p256+ml-dsa-65` container signatures (dual verification). Client demo: `--alg ed25519|ml-dsa-65|ecdsa-p256+ml-dsa-65` with automatic skip if PQC lib missing.
+- **Relax Header Budget Actuator**: When projected header bytes exceed budget, server returns 431 (too large) or 428 (must relax). Client auto‑retries in relaxed mode: moves large `evidence` JSON into the body + `evidence-sha-256` header. Heuristic keeps relaxed flow stable even if plan recalculates mid‑flight. Status & evidence reference stored in receipt (`evidence_ref`).
 - **Content Integrity**: Enforces `Content-Digest: sha-256=:…:` per **RFC 9530**.
 - **JCS Canonicalization (RFC 8785)**: All signed JSON (evidence, receipts) is canonicalized (subset: strings/ints only) to ensure hash stability.
 - **Receipts + Transparency**: Every decision emits a canonical, hash‑linked receipt. Daily Merkle tree + **Signed Tree Head** (Ed25519) + inclusion proofs. **Compliance Pack** bundler + offline verifier.
 - **Control‑theoretic breaker (scaffold)**: EWMA + hysteresis with safe defaults (advisory; wired for future enforcement).
 - **DX**: `tools/pch_client_demo.py` demo, Postman collection, curl recipes.
-- **Ops**: Non‑root Dockerfile, docker‑compose with Redis, NGINX forwarding `X‑TLS‑Session‑ID` for MVP binding.
+- **Ops**: Non‑root Dockerfile, docker‑compose with Redis, Envoy (TLS exporter placeholder), Prometheus, Grafana.
+- **Observability**: Dual metrics endpoints: human/dev JSON at `/__metrics`, Prometheus exposition at `/metrics` (counters, gauges, histograms: breaker state, EWMA error, rho, Kingman Wq, header + signature sizes, latency, request outcomes). Starter Grafana dashboard auto‑provisioned.
 - **CI**: Ruff, pytest, coverage; GitHub Actions workflow scaffold (pin to SHA in repo).
 
 ## Quickstart
@@ -25,15 +28,28 @@ pip install -r requirements.txt
 # 2) Generate server and client keys (Ed25519 for MVP)
 python tools/gen_ed25519.py
 
-# 3) Start infra (app + redis)
-docker compose up -d redis
+# 3) Start infra (app + redis + prometheus + grafana + envoy)
+docker compose up -d --build redis app prometheus grafana envoy
+## (Dev hot‑reload alternative)
 uvicorn src.signet.app:app --reload --port 8080
 
-# 4) (Optional) NGINX TLS terminator (dev)
-docker compose up -d nginx
-
-# 5) Try the PCH‑Lite demo
+# 4) Try the PCH‑Lite demo (HTTP)
 python tools/pch_client_demo.py --url http://localhost:8080/protected
+
+# 5) (Optional) PQC / Hybrid
+python tools/pch_client_demo.py --url http://localhost:8080/protected --alg ml-dsa-65
+python tools/pch_client_demo.py --url http://localhost:8080/protected --alg ecdsa-p256+ml-dsa-65
+
+# 6) (Optional) Envoy + TLS exporter placeholder (HTTPS)
+curl -k -I https://localhost:8443/protected
+python tools/pch_client_demo.py --url https://localhost:8443/protected --binding tls-exporter --insecure
+
+# 7) View Metrics
+curl http://localhost:8080/__metrics | jq '.'     # JSON (legacy/dev)
+curl http://localhost:8080/metrics                # Prometheus text
+
+# 8) Grafana (login admin / admin)
+# http://localhost:3000  (Dashboard: "Signet PQC Control Plane")
 ```
 
 ### Environment
@@ -49,22 +65,30 @@ SERVER_SIGNING_KEY=keys/sth_ed25519_sk.pem
 CLIENT_KEYS=config/clients.json
 ```
 
-### NGINX (MVP binding)
+### Channel Binding (Envoy TLS exporter placeholder)
 
-We forward the TLS session id as `X-TLS-Session-ID` (dev only). In `docker-compose.yml` the provided NGINX config uses:
+Development path:
 
-```nginx
-proxy_set_header X-TLS-Session-ID $ssl_session_id;
+1. Plain HTTP dev: pseudo binding via `X-TLS-Session-ID` (not cryptographically strong).
+2. HTTPS via Envoy: placeholder `x-tls-exporter` header simulating a TLS exporter token.
+3. Production upgrade: real TLS exporter (RFC 9266) implemented by a WASM/extension returning `EXPORTER-Channel-Binding` bytes (base64) — replace placeholder filter.
+
+Environment (compose sets defaults):
+
 ```
-
-> **Upgrade path:** Switch to TLS 1.3 `tls-exporter` via Envoy. See `src/signet/ingress/envoy/README.md`.
+BINDING_TYPE=tls-exporter
+BINDING_HEADER=X-TLS-Exporter
+REQUIRE_TLS_EXPORTER=true
+```
 
 ## Endpoints
 
 - `GET /__health` — health
-- `GET /protected` — protected route (returns 401 with PCH challenge if missing, or 200 on valid PCH)
-- `POST /protected` — same as above, with body digested/verified
-- `POST /compliance/pack` — build a Compliance Pack zip for a date (JSON input: `{ "date": "YYYY-MM-DD" }`)
+- `GET /protected` — protected route (401 challenge if missing signature; 200 on valid PCH)
+- `POST /protected` — same as above, enforces `Content-Digest`
+- `POST /compliance/pack` — build a Compliance Pack zip (JSON: `{ "date": "YYYY-MM-DD" }`)
+- `GET /__metrics` — JSON snapshot (legacy/dev friendly)
+- `GET /metrics` — Prometheus exposition (text/plain; scrape target)
 
 ## Specs (anchor citations)
 
@@ -75,11 +99,33 @@ proxy_set_header X-TLS-Session-ID $ssl_session_id;
 - TLS channel binding for TLS 1.3 — RFC 9266
 - Transparency log terms (STH/inclusion proofs) — RFC 9162 (CT v2)
 
+## Metrics (Prometheus)
+
+Key metric families:
+
+| Metric | Type | Labels | Purpose |
+|--------|------|--------|---------|
+| `signet_pqc_requests_total` | counter | `route,result,reason,http_status` | PCH verification outcomes |
+| `signet_http_responses_total` | counter | `route,code` | Status code distribution |
+| `signet_pqc_breaker_state` | gauge | `route` | Circuit breaker numeric state |
+| `signet_pqc_err_ewma` | gauge | `route` | EWMA error rate |
+| `signet_pqc_rho` | gauge | `route` | Utilization estimate (ρ) |
+| `signet_pqc_kingman_wq_ms` | gauge | `route` | Kingman queue wait (ms) |
+| `signet_pqc_utility_u` | gauge | `route` | Selected utility score |
+| `signet_pqc_header_total_bytes` | histogram | `route` | Header size distribution |
+| `signet_pqc_signature_bytes` | histogram | `route` | Signature header size |
+| `signet_pqc_latency_ms` | histogram | `route` | Middleware latency (ms) |
+
+Dashboard panels derive p50/p90 using `histogram_quantile` over `rate()` windows.
+
+Breaker / relax actuator interplay: spikes in header bytes + 431 / 428 responses should correlate with RELAX mode adoption (evidence shifts from header to body); watch `signet_pqc_header_total_bytes` quantiles trend downward after adaptation.
+
 ## Caveats
 
 - PCH‑Lite **advisory** by default. Turn enforcement on after pilots.
 - Binding is via session id in dev; **do not** treat as cryptographically strong.
-- PQC sigs: Ed25519 is default for demo. Hook points are in `crypto/signatures.py` to add ML‑DSA via OQS later.
+- PQC libs: ML‑DSA (Dilithium3) requires optional liboqs / python wrapper; tests skip gracefully if absent.
+- Hybrid verification requires both classical and PQC parts succeed.
 
 ## License
 
@@ -114,3 +160,63 @@ REQUIRE_TLS_EXPORTER=true
 `/echo/headers` now returns `x-tls-exporter` to aid debugging.
 
 > NOTE: Lua filter produces a non-RFC exporter digest. Replace with a real TLS exporter (RFC 9266) for production (WASM or compiled filter accessing SSL exporter API).
+
+## Helm Chart (Kubernetes Deploy)
+
+Experimental chart in `helm/signet` mounts controller config + Rego policy via ConfigMaps.
+
+```bash
+helm install demo helm/signet \
+	--set image.repository=yourrepo/signet-pqc \
+	--set image.tag=latest
+
+kubectl port-forward deploy/demo-signet 8080:8080
+curl http://127.0.0.1:8080/__health
+```
+
+Key values (override via `--set` or custom `values.yaml`):
+- `env.FEATURE_PCH` — enable/disable middleware
+- `controllerConfig` — entire YAML inlined (header budgets, thresholds)
+- `regoPolicy` — Rego for safety gating
+
+## gRPC (PCH‑Lite Metadata Prototype)
+
+Added proto: `src/signet/grpc/protected.proto` and async server `src/signet/grpc/server.py` implementing `Protected.Call`.
+
+Flow:
+1. First unary call without metadata returns a challenge (initial metadata `pch-challenge`).
+2. Client recomputes signature base over components, sends metadata:
+	 - `signature-input`
+	 - `signature`
+	 - `pch-challenge`
+	 - `pch-channel-binding` (future TLS exporter)
+	 - `evidence-sha-256` (optional relaxed path)
+3. Server verifies and emits receipt (decision reason `grpc_pch_ok`).
+
+Start server (dev):
+```bash
+python -m src.signet.grpc.server
+```
+
+Client scaffold: `tools/grpc_client_demo.py` (currently prints initial unauth reply; full signed retry wiring TBD).
+
+## Supply Chain: SBOM + (Minimal) Provenance
+
+Script `scripts/gen_sbom_provenance.ps1` produces:
+- CycloneDX SBOM (`sbom.json`) from `requirements.txt` (Python deps)
+- Minimal SLSA‑style provenance statement (`provenance.json`) referencing Dockerfile hash
+
+Example:
+```powershell
+pwsh scripts/gen_sbom_provenance.ps1 -ImageRef registry.example.com/signet-pqc:sha123
+cosign sign --key cosign.key registry.example.com/signet-pqc:sha123  # (manual; key not in repo)
+```
+
+Recommended next hardening steps:
+- Integrate `cosign attest --predicate provenance.json` into CI
+- Add container SBOM (e.g. `syft packages dir:./ -o cyclonedx-json`)
+- Generate SPDX + CycloneDX dual formats
+- Issue SLSA provenance using GitHub Actions OIDC + `cosign sign --identity` constraints
+
+---
+*Stretch add-ons implemented: Helm chart, Hypothesis fuzz tests (JCS + signature base), gRPC prototype service, SBOM + minimal provenance.*

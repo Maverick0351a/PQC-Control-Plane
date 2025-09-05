@@ -11,6 +11,8 @@ from .controller.monitor import monitor
 from .controller.state import load_state
 from .controller.plan import _UTILITY_CONTEXT, TRIP_ERR, CLOSE_SUCCESSES
 from .cbom.export import build_cbom
+from .obs.prom import prometheus_latest
+from .store.db import fetch_receipt
 import time
 
 load_dotenv()
@@ -105,6 +107,20 @@ async def metrics():
         "anomalies": mon.get("anomalies"),
         "header_total_bytes_hist": mon.get("header_total_bytes_hist"),
     })
+
+@app.get("/metrics")
+async def metrics_prom():  # Prometheus exposition
+    data, ctype = prometheus_latest()
+    from fastapi.responses import Response
+    return Response(content=data, media_type=ctype)
+
+@app.get("/receipts/{receipt_id}")
+async def get_receipt(receipt_id: str):
+    r = fetch_receipt(receipt_id)
+    if not r:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="receipt not found")
+    return r
 
 @app.get("/echo/headers")
 async def echo_headers(request: Request):

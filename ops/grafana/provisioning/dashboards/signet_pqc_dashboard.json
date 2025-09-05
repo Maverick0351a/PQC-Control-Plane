@@ -1,0 +1,99 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "schemaVersion": 38,
+  "version": 1,
+  "title": "Signet PQC Control Plane",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Breaker State (0=Closed,1=HalfOpen,2=Open)",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "signet_pqc_breaker_state", "legendFormat": "{{route}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "EWMA Error Rate",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 6},
+      "targets": [
+        {"expr": "signet_pqc_err_ewma", "legendFormat": "{{route}}"}
+      ],
+      "lines": true
+    },
+    {
+      "type": "graph",
+      "title": "Rho Utilization",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 6},
+      "targets": [
+        {"expr": "signet_pqc_rho", "legendFormat": "{{route}}"}
+      ],
+      "lines": true
+    },
+    {
+      "type": "graph",
+      "title": "Kingman Wq (ms)",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 6},
+      "targets": [
+        {"expr": "signet_pqc_kingman_wq_ms", "legendFormat": "{{route}}"}
+      ],
+      "lines": true
+    },
+    {
+      "type": "graph",
+      "title": "Header Bytes Histogram p50/p90",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(signet_pqc_header_total_bytes_bucket[5m])) by (le,route))", "legendFormat": "p50 {{route}}"},
+        {"expr": "histogram_quantile(0.9, sum(rate(signet_pqc_header_total_bytes_bucket[5m])) by (le,route))", "legendFormat": "p90 {{route}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Latency ms p50/p90",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(signet_pqc_latency_ms_bucket[5m])) by (le,route))", "legendFormat": "p50 {{route}}"},
+        {"expr": "histogram_quantile(0.9, sum(rate(signet_pqc_latency_ms_bucket[5m])) by (le,route))", "legendFormat": "p90 {{route}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "HTTP 431 Rate (header too large)",
+      "gridPos": {"x": 0, "y": 12, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "sum(rate(signet_http_responses_total{code='431'}[5m])) by (route)", "legendFormat": "431 {{route}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Relax Mode Requests",
+      "gridPos": {"x": 6, "y": 12, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "sum(rate(signet_pqc_requests_total{result='ok'}[5m])) by (route)", "legendFormat": "ok {{route}}"},
+        {"expr": "sum(rate(signet_pqc_requests_total{result='fail'}[5m])) by (route)", "legendFormat": "fail {{route}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Utility U",
+      "gridPos": {"x": 12, "y": 12, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "signet_pqc_utility_u", "legendFormat": "{{route}}"}
+      ]
+    },
+    {
+      "type": "table",
+      "title": "SASO Snapshot (State/Availability/Speed/Overhead)",
+      "gridPos": {"x": 18, "y": 12, "w": 6, "h": 8},
+      "targets": [
+        {"expr": "signet_pqc_breaker_state", "legendFormat": "state {{route}}"},
+        {"expr": "signet_pqc_err_ewma", "legendFormat": "err {{route}}"},
+        {"expr": "signet_pqc_rho", "legendFormat": "rho {{route}}"},
+        {"expr": "signet_pqc_kingman_wq_ms", "legendFormat": "wq {{route}}"},
+        {"expr": "signet_pqc_utility_u", "legendFormat": "u {{route}}"}
+      ]
+    }
+  ]
+}

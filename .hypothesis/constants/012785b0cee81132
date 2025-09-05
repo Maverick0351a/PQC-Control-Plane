@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\obs\prom.py
+# hypothesis_version: 6.138.2
+
+[0.0, 100, 128, 150, 192, 250, 256, 384, 500, 512, 768, 1000, 1024, 2000, 2048, 3072, 4096, 6144, 8192, 16384, 'Closed', 'FALLBACK_CLASSIC', 'HalfOpen', 'Open', 'action', 'bad_signature', 'code', 'err_ewma', 'fail', 'http_status', 'kingman_wq_ms', 'missing_signature', 'name', 'ok', 'over_budget_retry', 'reason', 'result', 'rho_est', 'route', 'signet_pqc_err_ewma', 'signet_pqc_rho', 'signet_pqc_utility_u', 'state', 'u_attempt', 'u_fallback', 'utility']

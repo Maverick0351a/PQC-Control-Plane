@@ -2,7 +2,7 @@ import base64
 import time
 import re
 from typing import Dict, Tuple, List
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 from .alg_registry import verify_alg
 from ..config import CLIENT_KEYS
@@ -63,6 +63,9 @@ def build_signature_base(request, components: List[str], params: Dict[str, str],
         else:
             # Generic header
             val = headers.get(lc, "")
+        # Sanitize to guarantee single-line (fuzz may introduce newlines in path or headers)
+        if isinstance(val, str):
+            val = val.replace("\r", "").replace("\n", "")
         lines.append(f"{lc}: {val}")
     # @signature-params (simplified)
     comp_list = " ".join([f'"{c}"' for c in components])

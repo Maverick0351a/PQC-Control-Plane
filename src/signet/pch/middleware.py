@@ -1,10 +1,11 @@
 """PCH verification & enforcement middleware."""
 
+import base64
+import os
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
-import base64
-import os
+
 from ..config import (
     FEATURE_PCH,
     PCH_ADVISORY,
@@ -12,26 +13,34 @@ from ..config import (
     BINDING_TYPE,
     REQUIRE_TLS_EXPORTER,
 )
-from ..receipts.store import ReceiptStore
 from ..controller.monitor import monitor
+from ..controller.plan import (
+    set_utility_context,
+    clear_utility_context,
+    plan as breaker_plan,
+)
+from ..controller.shield import shield, shield_outcome
 from ..crypto.digest import parse_content_digest
-from .binding import extract_binding
 from ..crypto.signatures import (
     parse_signature_input,
     build_signature_base,
     verify_signature,
 )
-from ..pch.nonce_store import NonceStore
 from ..pch.evidence import evidence_sha256_hex_from_header
+from ..pch.nonce_store import NonceStore
+from ..receipts.store import ReceiptStore
 from ..utils.logging import get_logger
-from ..controller.shield import shield, shield_outcome
+from ..obs.prom import observe_request, update_breaker_snapshot
+from .binding import extract_binding
+
+HEADER_BUDGET_LIMIT = int(os.getenv("HEADER_BUDGET_LIMIT", "4096"))
 
 log = get_logger()
 nonce_store = NonceStore()
 _receipt_store = ReceiptStore()
 
 
-def feature_enabled() -> bool:  # pragma: no cover simple accessor
+def feature_enabled() -> bool:  # pragma: no cover - simple accessor
     return FEATURE_PCH
 
 
@@ -39,7 +48,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
 
-    async def dispatch(self, request, call_next):  # noqa: C901 complexity acceptable for now
+    async def dispatch(self, request, call_next):  # noqa: C901
         start_time = __import__("time").time()
 
         # 1. Content-Digest (advisory)
@@ -66,98 +75,54 @@ class PCHMiddleware(BaseHTTPMiddleware):
             f"PCH middleware observed {('X-TLS-Exporter' if binding_type=='tls-exporter' else BINDING_HEADER)}="
             f"{tls_id if tls_id else '(none)'}"
         )
-        # Early breaker evaluation; allow challenge path even if open (dynamic flag)
-    # breaker_plan placeholder removed (unused)
+
         dynamic_breaker_enabled = os.getenv("BREAKER_ENABLED", "false").lower() == "true"
         if dynamic_breaker_enabled:
             sh_early = shield(route)
             if isinstance(sh_early, JSONResponse):
                 if sig_input or signature:
                     return sh_early
-                # breaker open on challenge path; continuing without using plan structure
-            else:
-                pass  # sh_early is a plan dict (unused here)
 
-        # 3. Challenge path (missing signature artifacts)
+        # 3. Utility context (header budget projection)
+        try:
+            projected_header_bytes = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
+            set_utility_context(
+                {
+                    "header_budget_total": HEADER_BUDGET_LIMIT,
+                    "header_total_bytes": projected_header_bytes,
+                }
+            )
+        except Exception:  # pragma: no cover
+            pass
+
+        current_plan = breaker_plan(route)
+        action = current_plan.get("action")
+
+        # 4. Challenge (missing signature artifacts)
+        public_paths = {"/__health", "/__metrics", "/cbom.json", "/echo/headers"}
+        if route.startswith("/metrics") or route.startswith("/receipts/"):
+            public_paths.add(route)
+        if route in public_paths:
+            # Skip PCH processing entirely for public informational endpoints
+            clear_utility_context()
+            return await call_next(request)
+
         if not sig_input or not signature:
             nonce = nonce_store.issue(route=route, client_ip=client_ip, tls_id=tls_id or "dev")
             challenge_val = f":{nonce}:"
             challenge_headers = {
-                "WWW-Authenticate": f'PCH realm="pqc", algs="ed25519 ml-dsa-65 ecdsa-p256+ml-dsa-65", challenge=":{nonce}:"',
+                "WWW-Authenticate": f'PCH realm="pqc", algs="ed25519 ml-dsa-65 ecdsa-p256+ml-dsa-65", hints="relax-header-budget", challenge=":{nonce}:"',
                 "PCH-Challenge": challenge_val,
                 "Cache-Control": "no-store",
             }
-            if PCH_ADVISORY:
-                request.state.pch_result = {
-                    "present": False,
-                    "verified": False,
-                    "failure_reason": "missing_signature",
-                    "channel_binding": binding_type,
-                }
-                if route.startswith("/protected"):
-                    # Emit monitoring event for challenge so route stats appear even without signature
-                    try:  # pragma: no cover
-                        hdr_total = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
-                        largest_hdr = max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0)
-                        monitor.emit(
-                            {
-                                "pch_present": False,
-                                "pch_verified": False,
-                                "failure_reason": "missing_signature",
-                                "header_total_bytes": hdr_total,
-                                "largest_header_bytes": largest_hdr,
-                                "signature_bytes": 0,
-                                "latency_ms": (__import__("time").time() - start_time) * 1000.0,
-                                "http_status": 401,
-                                "is_guarded_route": True,
-                                "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
-                                "route": route,
-                            }
-                        )
-                    except Exception as e:  # pragma: no cover
-                        log.warning(f"monitor emit (challenge protected) failed: {e}")
-                    # Emit a denial receipt for challenge so transparency log captures enforcement rationale
-                    try:  # pragma: no cover
-                        _receipt_store.emit_enforcement_receipt(
-                            request=request,
-                            decision="deny",
-                            reason="missing_signature_challenge",
-                            pch=request.state.pch_result,
-                        )
-                    except Exception as e:  # pragma: no cover
-                        log.warning(f"receipt emit (challenge protected) failed: {e}")
-                    return JSONResponse(
-                        {"error": "PCH required", "hint": "sign request and retry"},
-                        status_code=401,
-                        headers=challenge_headers,
-                    )
-                response = await call_next(request)
-                for k, v in challenge_headers.items():
-                    response.headers[k] = v
-                # Emit monitoring event for unprotected/advisory challenge path
-                try:  # pragma: no cover
-                    hdr_total = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
-                    largest_hdr = max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0)
-                    monitor.emit(
-                        {
-                            "pch_present": False,
-                            "pch_verified": False,
-                            "failure_reason": "missing_signature",
-                            "header_total_bytes": hdr_total,
-                            "largest_header_bytes": largest_hdr,
-                            "signature_bytes": 0,
-                            "latency_ms": (__import__("time").time() - start_time) * 1000.0,
-                            "http_status": response.status_code,
-                            "is_guarded_route": route.startswith("/protected"),
-                            "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
-                            "route": route,
-                        }
-                    )
-                except Exception as e:  # pragma: no cover
-                    log.warning(f"monitor emit (challenge advisory) failed: {e}")
-                return response
-            # Non-advisory: still emit a monitoring event so route stats populate
-            try:  # pragma: no cover
+            request.state.pch_result = {
+                "present": False,
+                "verified": False,
+                "failure_reason": "missing_signature",
+                "channel_binding": binding_type,
+            }
+            status = 401
+            try:  # monitoring
                 hdr_total = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
                 largest_hdr = max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0)
                 monitor.emit(
@@ -169,20 +134,54 @@ class PCHMiddleware(BaseHTTPMiddleware):
                         "largest_header_bytes": largest_hdr,
                         "signature_bytes": 0,
                         "latency_ms": (__import__("time").time() - start_time) * 1000.0,
-                        "http_status": 401,
+                        "http_status": status,
                         "is_guarded_route": route.startswith("/protected"),
                         "tls_binding_header_present": bool(request.headers.get(BINDING_HEADER)),
                         "route": route,
                     }
                 )
-            except Exception as e:  # pragma: no cover
-                log.warning(f"monitor emit (challenge non-advisory) failed: {e}")
-            return JSONResponse({"error": "PCH required"}, status_code=401, headers=challenge_headers)
+            except Exception:  # pragma: no cover
+                pass
+            # Emit denial receipt for protected challenges so transparency log records it
+            if route.startswith("/protected"):
+                try:  # pragma: no cover
+                    _receipt_store.emit_enforcement_receipt(
+                        request=request,
+                        decision="deny",
+                        reason="missing_signature_challenge",
+                        pch=request.state.pch_result,
+                    )
+                except Exception:
+                    pass
+            # Intentionally DO NOT clear utility context here; relaxed follow-up may rely on it
+            return JSONResponse({"error": "PCH required"}, status_code=status, headers=challenge_headers)
 
-        # 4. Parse signature-input
+        # 5. Header budget & relax-mode pre-check
+        header_total_bytes = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
+        over_budget = header_total_bytes > HEADER_BUDGET_LIMIT
+        relax_mode = action == "RELAX_HEADER_BUDGET"
+        if not relax_mode and "evidence-sha-256" in headers_lower and "evidence" not in headers_lower:
+            # Heuristic: client adapted to relaxed mode (body evidence) even if current plan recomputed to normal
+            relax_mode = True
+        evidence_header_present = "evidence" in headers_lower
+        if relax_mode and evidence_header_present:
+            clear_utility_context()
+            return JSONResponse(
+                {
+                    "error": "header budget exceeded",
+                    "hint": "use relaxed evidence body mode",
+                    "mode": "RELAX_HEADER_BUDGET",
+                },
+                status_code=428,
+            )
+        if over_budget and not relax_mode:
+            clear_utility_context()
+            return JSONResponse({"error": "headers too large"}, status_code=431)
+
+        # 6. Parse signature-input
         try:
             label, components, params = parse_signature_input(sig_input)
-        except Exception:  # pragma: no cover
+        except Exception:
             request.state.pch_result = {
                 "present": True,
                 "verified": False,
@@ -193,7 +192,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"error": "bad signature-input"}, status_code=401)
             return await call_next(request)
 
-        # 5. Extract signature bytes
+        # 7. Extract signature bytes
         sig_b64 = None
         try:
             for part in [p.strip() for p in signature.split(",")]:
@@ -208,16 +207,51 @@ class PCHMiddleware(BaseHTTPMiddleware):
         except Exception:  # pragma: no cover
             pass
 
-        # 6. Evidence (optional)
+        # 8. Evidence (two modes)
         evidence_sha256_hex = ""
-        evidence_b64 = headers_lower.get("evidence")
-        if evidence_b64:
-            try:
-                evidence_sha256_hex = evidence_sha256_hex_from_header(evidence_b64)
-            except Exception:  # pragma: no cover
-                evidence_sha256_hex = ""
+        evidence_ref = None
+        if relax_mode:
+            ev_hex_hdr = headers_lower.get("evidence-sha-256", "")
+            body_bytes = await request.body()
+            evidence_json_obj = None
+            if body_bytes:
+                try:
+                    if request.headers.get("content-type", "").startswith("application/json"):
+                        import json as _json
+                        evidence_json_obj = _json.loads(body_bytes.decode())
+                except Exception:  # pragma: no cover
+                    evidence_json_obj = None
+            if isinstance(evidence_json_obj, dict) and "evidence" in evidence_json_obj:
+                ev_bytes = __import__("json").dumps(
+                    evidence_json_obj["evidence"], separators=(",", ":")
+                ).encode()
+                import hashlib as _hashlib
 
-        # 7. Build signature base
+                calc_hex = _hashlib.sha256(ev_bytes).hexdigest()
+                evidence_sha256_hex = calc_hex
+                evidence_ref = calc_hex
+                if ev_hex_hdr and ev_hex_hdr != calc_hex:
+                    clear_utility_context()
+                    request.state.pch_result = {
+                        "present": True,
+                        "verified": False,
+                        "failure_reason": "bad_evidence_hash",
+                        "channel_binding": binding_type,
+                    }
+                    return JSONResponse({"error": "evidence hash mismatch"}, status_code=400)
+            else:
+                clear_utility_context()
+                return JSONResponse({"error": "missing evidence body"}, status_code=400)
+        else:
+            evidence_b64 = headers_lower.get("evidence")
+            if evidence_b64:
+                try:
+                    evidence_sha256_hex = evidence_sha256_hex_from_header(evidence_b64)
+                    evidence_ref = evidence_sha256_hex
+                except Exception:  # pragma: no cover
+                    evidence_sha256_hex = ""
+
+        # 9. Build signature base
         base = build_signature_base(
             request=request,
             components=components,
@@ -226,7 +260,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
         )
         log.info("Server signature-base:\n" + base)
 
-        # 8. Nonce check
+        # 10. Nonce check
         challenge_hdr = headers_lower.get("pch-challenge", "")
         presented_nonce = (
             challenge_hdr[1:-1]
@@ -240,28 +274,34 @@ class PCHMiddleware(BaseHTTPMiddleware):
             nonce=presented_nonce,
         )
 
-        # 9. Channel binding check
+        # 11. Channel binding check
         if binding_type == "tls-session-id":
-            expected_binding = f"tls-session-id=:{base64.b64encode((tls_id or 'dev').encode()).decode()}:"
-        else:  # tls-exporter
+            expected_binding = (
+                f"tls-session-id=:{base64.b64encode((tls_id or 'dev').encode()).decode()}:"
+            )
+        else:
             expected_binding = f"tls-exporter=:{tls_id}:" if tls_id else ""
         binding_ok = pch_binding_hdr == expected_binding
         if not binding_ok:
-            log.info(f"Binding mismatch type={binding_type} expected='{expected_binding}' got='{pch_binding_hdr}' tls_id='{tls_id}'")
+            log.info(
+                "Binding mismatch type=%s expected='%s' got='%s' tls_id='%s'",
+                binding_type,
+                expected_binding,
+                pch_binding_hdr,
+                tls_id,
+            )
 
-        # 10. Signature verify
+        # 12. Signature verify
         alg = params.get("alg", "ed25519")
         keyid = params.get("keyid", "")
         sig_ok = bool(
             sig_b64
-            and verify_signature(
-                alg=alg, keyid=keyid, signature_b64=sig_b64, message=base
-            )
+            and verify_signature(alg=alg, keyid=keyid, signature_b64=sig_b64, message=base)
         )
 
         verified = bool(sig_ok and nonce_ok and binding_ok and content_ok)
 
-        # 11. Record result
+        # 13. Record result
         request.state.pch_result = {
             "present": True,
             "verified": verified,
@@ -285,21 +325,27 @@ class PCHMiddleware(BaseHTTPMiddleware):
             "channel_binding": binding_type,
             "evidence_sha256_hex": evidence_sha256_hex,
             "sig_alg": alg,
+            "evidence_ref": evidence_ref,
+            "relax_mode": relax_mode,
         }
 
         if not verified and not PCH_ADVISORY:
             return JSONResponse(
-                {"error": "PCH verification failed", "reason": request.state.pch_result["failure_reason"]},
+                {
+                    "error": "PCH verification failed",
+                    "reason": request.state.pch_result["failure_reason"],
+                },
                 status_code=401,
             )
 
-        # 12. Enforcement (guarded routes)
-        dyn_routes = [p.strip() for p in os.getenv("ENFORCE_PCH_ROUTES", "").split(",") if p.strip()]
+        # 14. Enforcement (guarded routes)
+        dyn_routes = [
+            p.strip() for p in os.getenv("ENFORCE_PCH_ROUTES", "").split(",") if p.strip()
+        ]
         if dynamic_breaker_enabled:
             sh = shield(route)
-            if isinstance(sh, JSONResponse):
+            if isinstance(sh, JSONResponse):  # breaker opened mid-flight
                 return sh
-            # sh is a plan dict (unused)
         if any(route.startswith(p) for p in dyn_routes):
             pch_res = request.state.pch_result
             must_have = pch_res.get("present") and pch_res.get("verified")
@@ -311,20 +357,30 @@ class PCHMiddleware(BaseHTTPMiddleware):
                     reason="pch_enforce",
                     pch=pch_res,
                 )
-                return JSONResponse({"error": "PCH required", "hint": "sign request and retry", "receipt_id": rec["id"]}, status_code=401)
+                return JSONResponse(
+                    {
+                        "error": "PCH required",
+                        "hint": "sign request and retry",
+                        "receipt_id": rec["id"],
+                    },
+                    status_code=401,
+                )
 
+        # 15. Downstream
         response = await call_next(request)
 
-        # 13. Monitoring emit
-        try:  # pragma: no cover
-            pch_res = getattr(request.state, "pch_result", {})
+        # 16. Monitoring + Prometheus instrumentation
+        pch_res = getattr(request.state, "pch_result", {})
+        hdr_total = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
+        sig_header = request.headers.get("signature", "")
+        sig_bytes = len(sig_header.encode()) if sig_header else 0
+        latency_ms = (__import__("time").time() - start_time) * 1000.0
+        try:  # legacy monitor JSON aggregation
             if dynamic_breaker_enabled:
                 shield_outcome(route, bool(pch_res.get("verified")))
-            hdr_total = sum(len(k) + len(v) + 4 for k, v in request.headers.items())
-            largest_hdr = max((len(k) + len(v) + 4 for k, v in request.headers.items()), default=0)
-            sig_header = request.headers.get("signature", "")
-            sig_bytes = len(sig_header.encode()) if sig_header else 0
-            latency_ms = (__import__("time").time() - start_time) * 1000.0
+            largest_hdr = max(
+                (len(k) + len(v) + 4 for k, v in request.headers.items()), default=0
+            )
             monitor.emit(
                 {
                     "pch_present": bool(pch_res.get("present")),
@@ -342,4 +398,21 @@ class PCHMiddleware(BaseHTTPMiddleware):
             )
         except Exception as e:  # pragma: no cover
             log.warning(f"monitor emit failed: {e}")
+        try:  # Prometheus
+            observe_request(
+                route=route,
+                verified=bool(pch_res.get("verified")),
+                failure_reason=pch_res.get("failure_reason") or "none",
+                http_status=response.status_code,
+                header_total_bytes=hdr_total,
+                signature_bytes=sig_bytes,
+                latency_ms=latency_ms,
+            )
+            if dynamic_breaker_enabled:
+                # Use existing snapshot from breaker_plan for route
+                snap = breaker_plan(route)
+                update_breaker_snapshot(route, snap, snap)
+        except Exception as e:  # pragma: no cover
+            log.debug(f"prometheus instrumentation failed: {e}")
+        clear_utility_context()
         return response

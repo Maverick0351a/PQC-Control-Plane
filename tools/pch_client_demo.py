@@ -3,7 +3,6 @@ import base64
 import time
 import httpx
 import hashlib
-import json
 from cryptography.hazmat.primitives import serialization
 from urllib.parse import urlparse
 
@@ -67,6 +66,8 @@ def main():
     ap.add_argument("--alg", choices=["ed25519","ml-dsa-65","ecdsa-p256+ml-dsa-65"], default="ed25519")
     ap.add_argument("--ecdsa-key", help="Path to ECDSA P-256 PEM (for hybrid)")
     ap.add_argument("--mldsa-sk-b64", help="Base64 Dilithium3 secret key (for ml-dsa or hybrid)")
+    ap.add_argument("--evidence-mode", choices=["header","body"], default="header", help="Where to place evidence JSON")
+    ap.add_argument("--evidence", help="Raw evidence JSON (defaults to small demo)")
     args = ap.parse_args()
 
     # Step 1: Obtain challenge (always send stable synthetic binding id for dev)
@@ -87,7 +88,20 @@ def main():
         print("Binding id used (X-TLS-Session-ID & channel-binding):", binding_id)
 
         # Step 2: Signed POST with same binding id (nonce key matches)
-        body = args.body.encode()
+        # Build evidence
+        import json as _json
+        evidence_obj = _json.loads(args.evidence) if args.evidence else {"demo": True, "ts": int(time.time())}
+        evidence_json = _json.dumps(evidence_obj, separators=(",", ":"))
+        body_payload = args.body
+        if args.evidence_mode == "body":
+            # Embed evidence inside body json envelope
+            try:
+                base_obj = _json.loads(body_payload)
+            except Exception:
+                base_obj = {"demo": True}
+            base_obj["evidence"] = evidence_obj
+            body_payload = _json.dumps(base_obj, separators=(",", ":"))
+        body = body_payload.encode()
         if args.binding == "tls-exporter":
             # Attempt to fetch exporter via /echo/headers diagnostic (same host)
             echo_url = args.url.rsplit('/',1)[0] + "/echo/headers"
@@ -115,10 +129,20 @@ def main():
                 "pch-channel-binding": f"tls-session-id=:{b64(binding_id.encode())}:",
                 "X-TLS-Session-ID": binding_id,
             }
+        # Evidence placement
+        if args.evidence_mode == "header":
+            # Provide evidence header base64 (sha-256 already covered in digest lines)
+            ev_b64 = base64.b64encode(evidence_json.encode()).decode()
+            base_headers["evidence"] = f":{ev_b64}:"
+        else:
+            # Include only evidence-sha-256 header for relaxed mode
+            import hashlib as _hashlib
+            ev_hex = _hashlib.sha256(evidence_json.encode()).hexdigest()
+            base_headers["evidence-sha-256"] = ev_hex
         req = s.build_request("POST", args.url, headers=base_headers, content=body)
         base_headers["host"] = req.headers.get("host")
         components = ["@method","@path","@authority","content-digest","pch-challenge","pch-channel-binding"]
-    params = {"created": str(int(time.time())), "keyid": "caller-1", "alg": args.alg}
+        params = {"created": str(int(time.time())), "keyid": "caller-1", "alg": args.alg}
         base = build_signature_base(
             "POST",
             str(req.url),
@@ -156,6 +180,11 @@ def main():
         )
         req.headers["signature"] = f"pch=:{sig}:"
         r2 = s.send(req)
+        if r2.status_code in (428,431) and args.evidence_mode == "header":
+            print(f"Server responded {r2.status_code}; retrying in relax header budget mode (evidence body)")
+            # Switch to body mode automatically
+            args.evidence_mode = "body"
+            return main()  # recursive simple restart
         print("POST status:", r2.status_code, r2.text)
         if r2.status_code == 200:
             try:

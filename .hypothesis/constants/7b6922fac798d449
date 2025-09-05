@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\controller\monitor.py
+# hypothesis_version: 6.138.14
+
+[0.0, 1e-06, 0.2, 0.999, 1.0, 2.0, 3.0, 60.0, 600.0, 1000.0, 128, 256, 431, 500, 512, 599, 600, 1024, 2048, 4096, 8192, 16384, 32768, '/', '>32768', 'anomalies', 'bad_binding', 'bad_content_digest', 'bad_signature', 'bad_signature_input', 'errors', 'ewma_error_rate', 'ewma_latency_ms', 'failure_reason', 'header_431_spike', 'header_budget', 'header_total_bytes', 'http_431_total', 'http_5xx_total', 'http_status', 'http_timeout_total', 'kingman_wq_ms', 'latency_ms', 'missing_signature', 'nonce_replay', 'none', 'pch_present', 'pch_verified', 'pqc_attempts_total', 'pqc_verified_total', 'rho_estimate', 'route', 'route_stats', 'routes', 'signature_bytes', 'signature_bytes_hist', 'timeout_spike', 'tls_alert_spike', 'total', 'transport', 'unknown']

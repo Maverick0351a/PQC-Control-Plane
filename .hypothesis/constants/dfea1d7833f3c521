@@ -1,0 +1,4 @@
+# file: C:\Users\Maver\Downloads\signet-pqc-mvp\src\signet\store\db.py
+# hypothesis_version: 6.138.2
+
+[0.0, '50', ';', 'RECEIPT_BATCH_SIZE', 'controller', 'created_ts', 'decision', 'ed25519', 'id', 'leaf_count', 'leaf_hash_b64', 'prev_sth_hash_b64', 'public_key_b64', 'rb', 'reason', 'receipts.db', 'root_hash_b64', 'sig_alg', 'sth', 'sth_sig_b64', 'ts', 'type']

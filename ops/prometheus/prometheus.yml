@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'signet-app'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['app:8080']
+  - job_name: 'envoy'
+    metrics_path: /stats/prometheus
+    static_configs:
+      - targets: ['envoy:8443']
+    scheme: http

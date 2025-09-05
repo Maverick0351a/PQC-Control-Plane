@@ -9,6 +9,7 @@ from ..controller.state import load_state
 from ..controller.plan import plan
 from ..crypto.jcs import jcs_canonicalize
 from ..config import DATA_DIR
+from ..store.db import persist_receipt
 
 class ReceiptStore:
     def __init__(self):
@@ -76,4 +77,8 @@ class ReceiptStore:
 
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")
+        try:
+            persist_receipt(rec)
+        except Exception:
+            pass
         return rec
