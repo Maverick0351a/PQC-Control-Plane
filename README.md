@@ -76,6 +76,16 @@ PYTHONPATH=src python -m signet.vsp.cli ./scenarios/sample-chaos.yaml
 
 The CLI prints a manifest with the emitted receipt IDs. Receipts are also appended to `var/data/YYYY-MM-DD/receipts.jsonl` and forwarded to EVG if enabled (see below).
 
+Optional: produce a compliance pack zip (includes receipts and EVG STH):
+
+```powershell
+$env:PYTHONPATH = "src"; python -m signet.vsp.cli .\scenarios\sample-chaos.yaml --bundle .\var\packs\vsp-run.zip
+```
+
+```bash
+PYTHONPATH=src python -m signet.vsp.cli ./scenarios/sample-chaos.yaml --bundle ./var/packs/vsp-run.zip
+```
+
 ### Environment
 
 Create `.env` (or export variables):
