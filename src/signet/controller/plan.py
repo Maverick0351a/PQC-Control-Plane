@@ -10,7 +10,9 @@ from .config import ControllerConfig
 # Utility context (set per-request in middleware) for evaluating safe envelope + utility.
 _UTILITY_CTX: Dict[str, Any] | None = None
 # Expanded history (audit requirement) – keep last 100 decisions
-_DECISIONS: Deque[Dict[str, Any]] = deque(maxlen=100)  # retain 100 for audit; metrics slice last 50
+DECISION_BUFFER_MAX = 100
+DECISION_METRICS_SLICE = 50
+_DECISIONS: Deque[Dict[str, Any]] = deque(maxlen=DECISION_BUFFER_MAX)  # audit ring
 
 def set_utility_context(ctx: Dict[str, Any]):  # pragma: no cover - simple
     global _UTILITY_CTX
@@ -211,11 +213,10 @@ def plan(route: str):  # pragma: no cover - legacy path
     }
 
 def last_decisions():  # pragma: no cover - trivial
-    # Return only the most recent 50 decisions to satisfy metrics requirement while
-    # retaining a deeper (100) audit buffer internally.
-    if len(_DECISIONS) <= 50:
+    # Return only the most recent slice for metrics exposure.
+    if len(_DECISIONS) <= DECISION_METRICS_SLICE:
         return list(_DECISIONS)
-    return list(_DECISIONS)[-50:]
+    return list(_DECISIONS)[-DECISION_METRICS_SLICE:]
 
 
 def record_load_shed(route: str, st: ControllerState, reason: str):  # pragma: no cover - helper

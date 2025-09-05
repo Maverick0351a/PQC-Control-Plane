@@ -14,6 +14,15 @@ __pycache__/
 # Coverage / test
 .coverage
 htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# Generated test artifacts
+*.sqlite3
+*.db
+
+# Local sandbox certs
+sandbox/envoy/certs/*
 
 # Build
 dist/
@@ -25,3 +34,12 @@ data/
 
 # Docker
 *.log
+
+# Dev TLS certs (do not commit)
+src/signet/ingress/certs/*
+
+# Runtime logs
+uvicorn.out
+uvicorn.err
+
+# Platform normalization (recommend adding .gitattributes with text=auto)
