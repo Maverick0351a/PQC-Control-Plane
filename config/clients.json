@@ -2,5 +2,14 @@
   "caller-1": {
     "alg": "ed25519",
     "public_key_b64": "RHLHDoE52gKs2BbwStmx8Qr3piaTPVeyl50f3WdCRo4="
+  },
+  "caller-ml": {
+    "alg": "ml-dsa-65",
+    "public_key_b64": ""  
+  },
+  "caller-hybrid": {
+    "alg": "ecdsa-p256+ml-dsa-65",
+    "ecdsa_p256_pem": "",
+    "ml_dsa_65_pk_b64": ""
   }
 }

@@ -83,7 +83,7 @@ class PCHMiddleware(BaseHTTPMiddleware):
             nonce = nonce_store.issue(route=route, client_ip=client_ip, tls_id=tls_id or "dev")
             challenge_val = f":{nonce}:"
             challenge_headers = {
-                "WWW-Authenticate": f'PCH realm="pqc", algs="ed25519", challenge=":{nonce}:"',
+                "WWW-Authenticate": f'PCH realm="pqc", algs="ed25519 ml-dsa-65 ecdsa-p256+ml-dsa-65", challenge=":{nonce}:"',
                 "PCH-Challenge": challenge_val,
                 "Cache-Control": "no-store",
             }

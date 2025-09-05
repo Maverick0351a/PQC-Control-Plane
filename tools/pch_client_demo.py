@@ -3,8 +3,16 @@ import base64
 import time
 import httpx
 import hashlib
+import json
 from cryptography.hazmat.primitives import serialization
 from urllib.parse import urlparse
+
+try:  # optional
+    import oqs  # type: ignore
+except Exception:  # pragma: no cover
+    oqs = None  # type: ignore
+
+from src.signet.crypto.sign import sign_message
 
 def b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
@@ -56,6 +64,9 @@ def main():
     ap.add_argument("--insecure", action="store_true", help="Skip TLS verification (dev only)")
     ap.add_argument("--authority", help="override @authority in signature base (does NOT change actual Host header)")
     ap.add_argument("--binding", choices=["tls-session-id","tls-exporter"], default="tls-session-id")
+    ap.add_argument("--alg", choices=["ed25519","ml-dsa-65","ecdsa-p256+ml-dsa-65"], default="ed25519")
+    ap.add_argument("--ecdsa-key", help="Path to ECDSA P-256 PEM (for hybrid)")
+    ap.add_argument("--mldsa-sk-b64", help="Base64 Dilithium3 secret key (for ml-dsa or hybrid)")
     args = ap.parse_args()
 
     # Step 1: Obtain challenge (always send stable synthetic binding id for dev)
@@ -107,7 +118,7 @@ def main():
         req = s.build_request("POST", args.url, headers=base_headers, content=body)
         base_headers["host"] = req.headers.get("host")
         components = ["@method","@path","@authority","content-digest","pch-challenge","pch-channel-binding"]
-        params = {"created": str(int(time.time())), "keyid": "caller-1", "alg": "ed25519"}
+    params = {"created": str(int(time.time())), "keyid": "caller-1", "alg": args.alg}
         base = build_signature_base(
             "POST",
             str(req.url),
@@ -118,12 +129,30 @@ def main():
             override_authority=args.authority,
         )
         print("Client signature-base:\n" + base)
-        with open(args.key, "rb") as f:
-            sk = serialization.load_pem_private_key(f.read(), password=None)
-        sig = base64.b64encode(sk.sign(base.encode())).decode()
+        extra = {}
+        if args.alg == "ed25519":
+            with open(args.key, "rb") as f:
+                sk = serialization.load_pem_private_key(f.read(), password=None)
+            sig = base64.b64encode(sk.sign(base.encode())).decode()
+        elif args.alg == "ml-dsa-65":
+            if not args.mldsa_sk_b64:
+                print("--mldsa-sk-b64 required for ml-dsa-65")
+                return
+            extra["ml_dsa_65_sk_b64"] = args.mldsa_sk_b64
+            sig = sign_message("ml-dsa-65", "", base, extra)
+        elif args.alg == "ecdsa-p256+ml-dsa-65":
+            if not args.ecdsa_key or not args.mldsa_sk_b64:
+                print("--ecdsa-key and --mldsa-sk-b64 required for hybrid")
+                return
+            extra["ecdsa_p256_private_pem"] = open(args.ecdsa_key,"r",encoding="utf-8").read()
+            extra["ml_dsa_65_sk_b64"] = args.mldsa_sk_b64
+            sig = sign_message("ecdsa-p256+ml-dsa-65", "", base, extra)
+        else:
+            print("Unsupported alg")
+            return
         components_str = " ".join([f'"{c}"' for c in components])
         req.headers["signature-input"] = (
-            f"pch=({components_str});created={params['created']};keyid=\"caller-1\";alg=\"ed25519\""
+            f"pch=({components_str});created={params['created']};keyid=\"caller-1\";alg=\"{args.alg}\""
         )
         req.headers["signature"] = f"pch=:{sig}:"
         r2 = s.send(req)

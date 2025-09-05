@@ -4,6 +4,7 @@ import re
 from typing import Dict, Tuple, List
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives import serialization
+from .alg_registry import verify_alg
 from ..config import CLIENT_KEYS
 import json
 import os
@@ -84,33 +85,21 @@ def load_client_keys() -> Dict[str, Dict[str, str]]:
         return json.load(f)
 
 def verify_signature(alg: str, keyid: str, signature_b64: str, message: str) -> bool:
+    """Backward-compatible verification entrypoint.
+
+    Delegates to alg_registry for all algorithms (including legacy ed25519).
+    """
     keys = load_client_keys()
     entry = keys.get(keyid)
     if not entry:
         return False
+    # Allow hybrid client entries to advertise 'ecdsa-p256+ml-dsa-65'
     if entry.get("alg") != alg:
         return False
-    if alg.lower() == "ed25519":
-        pub_pem = entry.get("public_key_pem")
-        pub_b64 = entry.get("public_key_b64")
-        if pub_pem:
-            pub = Ed25519PublicKey.from_public_bytes(
-                serialization.load_pem_public_key(pub_pem.encode()).public_bytes(
-                    encoding=serialization.Encoding.Raw,
-                    format=serialization.PublicFormat.Raw
-                )
-            )
-        elif pub_b64:
-            pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_b64))
-        else:
-            return False
-        try:
-            pub.verify(base64.b64decode(signature_b64), message.encode())
-            return True
-        except Exception:
-            return False
-    # Future: ml-dsa via OQS
-    return False
+    try:
+        return verify_alg(alg, entry, signature_b64, message)
+    except Exception:  # pragma: no cover - defensive
+        return False
 
 def sign_ed25519(private_pem: str, message: str) -> str:
     priv = serialization.load_pem_private_key(private_pem.encode(), password=None)
