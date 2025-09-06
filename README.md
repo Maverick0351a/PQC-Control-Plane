@@ -173,6 +173,9 @@ REQUIRE_TLS_EXPORTER=true
 - `POST /compliance/pack` — build a Compliance Pack zip (JSON: `{ "date": "YYYY-MM-DD" }`)
 - `GET /__metrics` — JSON snapshot (legacy/dev friendly)
 - `GET /metrics` — Prometheus exposition (text/plain; scrape target)
+ - `GET /agent/aegis/plan?route=/foo` — advisory plan stub
+ - `GET /agent/sentinel/probe/headers` — headers‑budget probe stub
+ - `POST /agent/vkc/emit` — builds a VKC (VDC) blob and returns size
 
 ## Specs (anchor citations)
 

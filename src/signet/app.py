@@ -15,6 +15,7 @@ from .cbom.export import build_cbom
 from .obs.prom import prometheus_latest
 from .vdc.emitter import list_index as vdc_list_index
 from .store.db import fetch_receipt
+from .agent.routes import include_agent_routes
 import time
 
 load_dotenv()
@@ -36,6 +37,7 @@ if feature_enabled():
     app.add_middleware(PCHMiddleware)
 
 store = ReceiptStore()
+include_agent_routes(app)
 
 @app.get("/__health")
 async def health():
