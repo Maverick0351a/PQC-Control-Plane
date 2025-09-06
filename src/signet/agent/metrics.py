@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from fastapi.responses import Response
-from ..obs.prom import prometheus_latest
+from fastapi.responses import Response, JSONResponse
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+# Prometheus metrics (agent-focused)
+AG_ANSWERS = Counter("agent_answers_total", "Answers produced", ["result"])
+AG_UNCERTAIN = Counter("agent_answers_uncertain_total", "Answers marked uncertain")
+AG_COMPILER_BLOCKS = Counter("agent_compiler_blocks_total", "Answer compiler blocks")
+AG_SHIELD_BLOCKS = Counter("agent_shield_blocks_total", "Shield blocked intents", ["reason"])
+AG_SKILL_RUNS = Counter("agent_skill_runs_total", "Skill executions", ["skill", "result"])
+AG_USE_RECEIPTS = Counter("agent_use_receipts_total", "Use receipts minted")
+AG_SENTINEL_HYP = Counter("agent_sentinel_hypotheses_total", "Hypotheses submitted", ["disposition"])
+AG_DIRECTION_PROPOSALS = Counter("agent_direction_proposals_total", "Change proposals created", ["kind"])
+AG_LAT_MS = Histogram("agent_latency_ms", "Agent request latency (ms)")
+
+metrics_router = APIRouter()
+
+# Retain the JSON snapshot endpoint used by tests and dashboards
 from ..controller.monitor import monitor
 from ..controller.state import load_state
 from ..controller.plan import plan as controller_plan, last_decisions
 from ..controller.config import load_config
-from fastapi.responses import JSONResponse
-
-metrics_router = APIRouter()
 
 @metrics_router.get("/__metrics")
 async def metrics_json():
@@ -60,6 +72,5 @@ async def metrics_json():
     })
 
 @metrics_router.get("/metrics")
-async def metrics_prom():
-    data, ctype = prometheus_latest()
-    return Response(content=data, media_type=ctype)
+def prometheus_metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
