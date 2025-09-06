@@ -46,7 +46,12 @@ def build_vkc(plan: Dict[str, Any], *, kid: Optional[bytes] = None, sk: Optional
     if sk is None:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        pem_path = os.getenv("VDC_SIGNING_KEY", os.getenv("SERVER_SIGNING_KEY", "keys/sth_ed25519_sk.pem"))
+        # Accept either VDC_SIGN_KEY or VDC_SIGNING_KEY; fall back to SERVER_SIGNING_KEY
+        pem_path = (
+            os.getenv("VDC_SIGN_KEY")
+            or os.getenv("VDC_SIGNING_KEY")
+            or os.getenv("SERVER_SIGNING_KEY", "keys/sth_ed25519_sk.pem")
+        )
         with open(pem_path, "rb") as f:
             key = serialization.load_pem_private_key(f.read(), password=None)
             assert isinstance(key, Ed25519PrivateKey)
@@ -79,7 +84,8 @@ def build_vkc_with_signer(plan: Dict[str, Any], *, signer: Signer, key_ref: str,
     # Descriptor for digest-as-payload
     pd_list: List[Dict[int, Any]] = []
     d = compute_digest(plan_bytes, "sha-384")
-    pd_list.append(build_payload_descriptor("vkc-advisory-plan", "application/vnd.vkc+json-sha384", "sha-384", d, data_embedded=None, role="advisory"))
+    # Embed digest bytes as payload content (digest-as-payload convention)
+    pd_list.append(build_payload_descriptor("vkc-advisory-plan", "application/vnd.vkc+json-sha384", "sha-384", d, data_embedded=d, role="advisory"))
     # Build SigBase
     meta_digest = compute_digest(det_cbor_dumps(meta), "sha-384")
     payload_norm = [compute_digest(pd[4], "sha-384") for pd in pd_list]
