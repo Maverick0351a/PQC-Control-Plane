@@ -13,7 +13,7 @@ from .vkc import build_vkc, build_vkc_with_signer
 from .signer import PycaSigner, OqsSigner, KmsSigner
 
 
-router = APIRouter(prefix="/agent", tags=["agent"])
+router = APIRouter()
 
 
 @router.get("/aegis/plan")
@@ -88,4 +88,5 @@ async def emit_vkc_signer(route: str | None = None):
 
 
 def include_agent_routes(app):
-    app.include_router(router)
+    # Backward-compatible helper: include under /agent with tag
+    app.include_router(router, prefix="/agent", tags=["agent"])
