@@ -22,3 +22,6 @@ run:
 
 pack:
 	python tools/pch_client_demo.py --url http://localhost:8080/protected
+
+vectors:
+	python -m tools.gen_vdc_vectors

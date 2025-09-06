@@ -13,6 +13,7 @@ from .controller.plan import last_decisions, plan as controller_plan
 from .controller.config import load_config
 from .cbom.export import build_cbom
 from .obs.prom import prometheus_latest
+from .vdc.emitter import list_index as vdc_list_index
 from .store.db import fetch_receipt
 import time
 
@@ -151,3 +152,10 @@ async def echo_headers(request: Request):
 @app.get("/cbom.json")
 async def cbom():
     return JSONResponse(build_cbom())
+
+@app.get("/compliance/vdc/index.json")
+async def vdc_index():
+    try:
+        return JSONResponse(vdc_list_index())
+    except Exception:
+        return JSONResponse({})

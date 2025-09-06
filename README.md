@@ -19,13 +19,35 @@
 - **Observability**: Dual metrics endpoints: human/dev JSON at `/__metrics`, Prometheus exposition at `/metrics` (counters, gauges, histograms: breaker state, EWMA error, rho, Kingman Wq, header + signature sizes, latency, request outcomes). Starter Grafana dashboard auto‑provisioned.
 - **CI**: Ruff, pytest, coverage; GitHub Actions workflow scaffold (pin to SHA in repo).
 
+### VDC — Unified Evidence (Portable .vdc)
+
+- Unifies evidence: one portable file (.vdc) that self‑verifies (COSE signatures, deterministic CBOR, optional CT‑style anchor). Easier for pilots, auditors, and demos.
+- Drop‑in: you already produce receipts + STH; VDC is just the container that packages what you have with better canonicality.
+- Sets the foundation: your Calibrator and VSP can emit/ingest the same artifact. Less glue later.
+
+Try it:
+- Pack: `python -m signet.vdc.cli pack --purpose pch --producer signet --created 2025-09-05T00:00:00Z --input README.md --output out.vdc --priv-b64 <ed25519-raw-b64> --kid test-key-1`
+- Verify: `python -m signet.vdc.cli verify --input out.vdc --pub-b64 <ed25519-pub-raw-b64> --kid test-key-1`
+
+Interop vectors live in `vectors/vdc/` (see `vectors/vdc/README.md`).
+
+#### VDC‑first receipts and compliance
+
+- Per request, the controller writes alongside the legacy JSONL stream:
+	- `var/data/YYYY-MM-DD/receipts.jsonl` (legacy JSON)
+	- `var/data/YYYY-MM-DD/receipt-<id>.vdc` and `receipt-<id>.vdc.json` (JSON view of the CBOR)
+- Feature flag: `RECEIPT_VDC_ENABLED=true` (default). VDC generation is soft‑fail: even if VDC pack/signing errors occur, the request proceeds and legacy JSON is still written; errors are logged and counted in `signet_vdc_errors_total`.
+- Daily VDC aggregation runs when `FEATURE_VDC=true` and emits a day‑level `.vdc` pack.
+- Compliance pack endpoint returns a `.vdc` directly when present; fallback ZIP includes day `.vdc` files and legacy `receipts.jsonl`.
+- EVG ingestion accepts both legacy and VDC. For VDC, EVG anchors the leaf to `SHA‑256(SigBase)` (the COSE payload), aligning the STH with VDC’s own trivial CT/v2 anchor.
+
 ## Quickstart
 
 ```bash
 # 1) Setup
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
+- **Receipts + Transparency (VDC‑first)**: Per‑request dual‑write of receipts: legacy JSON and portable **.vdc** (+ `.vdc.json` view). Daily Merkle tree + **Signed Tree Head** (Ed25519) + inclusion proofs. Compliance Pack prefers **.vdc**; legacy JSON still produced for compatibility.
 # 2) Generate server and client keys (Ed25519 for MVP)
 python tools/gen_ed25519.py
 
@@ -96,6 +118,12 @@ $env:PYTHONPATH = "src"; python -m signet.compliance.verify_cli .\var\packs\vsp-
 PYTHONPATH=src python -m signet.compliance.verify_cli ./var/packs/vsp-run.zip
 ```
 
+Run the VDC test subset:
+
+```powershell
+pytest -q tests/vdc
+```
+
 ### Environment
 
 Create `.env` (or export variables):
@@ -111,6 +139,14 @@ CLIENT_KEYS=config/clients.json
 # Receipt forwarding to EVG (transparency sink)
 SIGNET_EVG_ENABLED=true
 RECEIPTS_SINK_URL=http://evg:8088/ingest
+ 
+# VDC emission (per‑receipt + daily pack)
+FEATURE_VDC=true
+RECEIPT_VDC_ENABLED=true
+VDC_DIR=var/data
+# Ed25519 private key and KID for COSE_Sign1 (provide via secret manager in real deployments)
+VDC_SIGNING_KEY=keys/sth_ed25519_sk.pem
+VDC_KID=demo-key-1
 ```
 
 ### Channel Binding (Envoy TLS exporter placeholder)
@@ -145,14 +181,9 @@ REQUIRE_TLS_EXPORTER=true
 - JSON Canonicalization Scheme — RFC 8785
 - TLS 1.3 / Exporter — RFC 8446 §7.5
 - TLS channel binding for TLS 1.3 — RFC 9266
+- REQUIRE_TLS_EXPORTER=true — in staging, require TLS exporter for VDC inclusion
 - Transparency log terms (STH/inclusion proofs) — RFC 9162 (CT v2)
 
-## Metrics (Prometheus)
-
-Key metric families:
-
-| Metric | Type | Labels | Purpose |
-|--------|------|--------|---------|
 | `signet_pqc_requests_total` | counter | `route,result,reason,http_status` | PCH verification outcomes |
 | `signet_http_responses_total` | counter | `route,code` | Status code distribution |
 | `signet_pqc_breaker_state` | gauge | `route` | Circuit breaker numeric state |

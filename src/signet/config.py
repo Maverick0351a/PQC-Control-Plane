@@ -35,3 +35,6 @@ CAB_ENABLED = os.getenv("CAB_ENABLED", "true").lower() == "true"
 CAB_HEADER_EXPOSE = os.getenv("CAB_HEADER_EXPOSE", "true").lower() == "true"
 PPA_ENABLED = os.getenv("PPA_ENABLED", "true").lower() == "true"
 PPA_CACHE_TTL_SEC = int(os.getenv("PPA_CACHE_TTL_SEC", "300"))
+
+# Per-receipt VDC dual-write toggle
+RECEIPT_VDC_ENABLED = os.getenv("RECEIPT_VDC_ENABLED", "true").lower() == "true"

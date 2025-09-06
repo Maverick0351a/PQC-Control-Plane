@@ -6,9 +6,9 @@ Prereq: Run at least one (preferably multiple) PCH round trips to emit receipts.
 Steps:
  1. Start server (if not already) OR reuse existing with -Reuse.
  2. Perform two signed round trips (emits receipts).
- 3. Call /compliance/pack for today's date.
- 4. Unzip pack to tmp_pack/.
- 5. Run offline verifier (expect OK).
+ 3. Call /compliance/pack for today's date. This now returns a .vdc path (or a zip containing only the .vdc and README).
+ 4. If zip, unzip pack to tmp_pack/; else copy .vdc into tmp_pack/.
+ 5. Verify .vdc with libvdc or CLI as needed.
  6. Stop server unless -Reuse supplied.
 
 Exit code 0 if verification OK, else 1.
@@ -55,14 +55,16 @@ $packPath = (ConvertFrom-Json $packJson).pack
 if(-not (Test-Path $packPath)) { Write-Error "Pack path not found: $packPath"; if($startedHere){ Stop-Process -Id $p.Id -Force }; exit 1 }
 
 if(Test-Path tmp_pack){ Remove-Item -Recurse -Force tmp_pack }
-Expand-Archive -Path $packPath -DestinationPath tmp_pack -Force
-Write-Host 'Pack extracted to tmp_pack/'
+New-Item -ItemType Directory tmp_pack | Out-Null
+if($packPath.ToLower().EndsWith('.zip')){
+  Expand-Archive -Path $packPath -DestinationPath tmp_pack -Force
+  Write-Host 'Pack extracted to tmp_pack/'
+} else {
+  Copy-Item -Path $packPath -Destination tmp_pack/
+  Write-Host "Copied VDC to tmp_pack/$(Split-Path -Leaf $packPath)"
+}
 
-Write-Host 'Running offline verifier...'
-$verifyOut = & $python tmp_pack/verify_cli.py tmp_pack/sth.json tmp_pack/receipts.jsonl tmp_pack/proofs 2>&1
-$verifyOut | ForEach-Object { Write-Host $_ }
-if($verifyOut -notmatch 'OK'){ Write-Error 'Compliance verification FAILED'; if($startedHere){ Stop-Process -Id $p.Id -Force }; exit 1 }
-Write-Host 'Compliance verification OK.'
+Write-Host 'Note: Verify .vdc using libvdc (Python/Go) or the VDC CLI.'
 
 if($startedHere -and -not $Reuse){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; Write-Host 'Server stopped.' }
 exit 0

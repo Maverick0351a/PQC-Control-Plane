@@ -13,9 +13,12 @@ from .envelope import build_envelope
 from ..controller.state import load_state
 from ..controller.plan import plan
 from ..crypto.jcs import jcs_canonicalize
-from ..config import DATA_DIR, SERVER_SIGNING_KEY
+from ..config import DATA_DIR, SERVER_SIGNING_KEY, RECEIPT_VDC_ENABLED
 from ..store.db import persist_receipt
 from .emit import submit_to_evg
+from ..vdc.emitter import add_receipt_entry, VDC_ERRORS, VDC_EMITTED, VDC_BYTES
+from ..vdc.pack import pack_vdc
+from ..vdc.model import to_jsonable
 from ..dpcp.advisory import compute_dpcp_record
 from ..controller.monitor import monitor
 
@@ -29,6 +32,16 @@ class ReceiptStore:
         day_dir = os.path.join(base_dir, date)
         os.makedirs(day_dir, exist_ok=True)
         return os.path.join(day_dir, "receipts.jsonl")
+
+    def _vdc_paths(self, rec_id: str, date=None):
+        date = date or datetime.date.today().isoformat()
+        base_dir = os.getenv("DATA_DIR", DATA_DIR)
+        day_dir = os.path.join(base_dir, date)
+        os.makedirs(day_dir, exist_ok=True)
+        return (
+            os.path.join(day_dir, f"receipt-{rec_id}.vdc"),
+            os.path.join(day_dir, f"receipt-{rec_id}.vdc.json"),
+        )
 
     def _last_hash_b64(self, path):
         if not os.path.exists(path):
@@ -229,4 +242,62 @@ class ReceiptStore:
             submit_to_evg(rec)
         except Exception:
             pass
+        # Feature-flagged: add to VDC daily pending and flush if needed
+        try:
+            add_receipt_entry(
+                rec,
+                canonical_bytes,
+                rec.get("dpcp_v1"),
+                request.headers.get("X-TLS-Exporter-B64") if exporter_bytes else None,
+            )
+        except Exception:
+            pass
+
+        # Per-request dual-write VDC alongside legacy JSON (soft-fail)
+        try:
+            if not RECEIPT_VDC_ENABLED:
+                return rec
+            # Build minimal per-receipt VDC: meta reflects immediate event
+            from ..vdc.emitter import _build_meta  # reuse existing helper
+            exporter_b64_any = request.headers.get("X-TLS-Exporter-B64") if exporter_bytes else None
+            meta = _build_meta(
+                exporter_b64_any,
+                route=request.url.path,
+                purpose="receipt-event",
+            )
+            # payloads: include canonical JCS sha-384 digest of receipt JSON
+            payloads = [(f"receipt-{rec['id']}", "application/receipt+json-sha384", hashlib.sha384(canonical_bytes).digest(), "receipt")]
+            # signing key and kid reuse server defaults
+            pem_path = os.getenv("VDC_SIGNING_KEY", os.getenv("SERVER_SIGNING_KEY", SERVER_SIGNING_KEY))
+            from cryptography.hazmat.primitives import serialization as _ser
+            with open(pem_path, "rb") as _f:
+                _sk = _ser.load_pem_private_key(_f.read(), password=None)
+            priv_bytes = _sk.private_bytes(encoding=_ser.Encoding.Raw, format=_ser.PrivateFormat.Raw, encryption_algorithm=_ser.NoEncryption())
+            kid = os.getenv("VDC_KID", "vdc-sth-ed25519").encode()
+            ekm_raw = base64.b64decode(exporter_b64_any) if exporter_b64_any else None
+            attach_anchor = os.getenv("VDC_INCLUDE_EVG", "false").lower() == "true"
+            profile = os.getenv("VDC_PROFILE") or ("vdc-bound" if ekm_raw else "vdc-core")
+            buf = pack_vdc(meta, payloads, priv_bytes, kid, attach_evg_anchor=attach_anchor, ekm=ekm_raw, timestamps=None, profile=profile)
+            vdc_path, vdc_json_path = self._vdc_paths(rec["id"]) 
+            with open(vdc_path, "wb") as vf:
+                vf.write(buf)
+            VDC_EMITTED.labels(mode="per-receipt").inc()
+            VDC_BYTES.inc(len(buf))
+            try:
+                # Write canonical JCS JSON view next to .vdc
+                from ..vdc.model import file_read_vdc
+                from ..crypto.jcs import jcs_canonicalize as _jcs
+                obj = file_read_vdc(buf)
+                view = to_jsonable(obj)
+                canon = _jcs(view)
+                with open(vdc_json_path, "w", encoding="utf-8") as jf:
+                    jf.write(canon.decode("utf-8"))
+            except Exception:
+                VDC_ERRORS.labels(reason="vdc_json_write").inc()
+        except Exception as e:
+            # Soft-fail: log via metric; never block request or legacy receipt
+            try:
+                VDC_ERRORS.labels(reason=type(e).__name__).inc()
+            except Exception:
+                pass
         return rec

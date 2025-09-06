@@ -18,11 +18,15 @@ import (
     "os"
     "sync"
     "time"
+
+    cbor "github.com/fxamacker/cbor/v2"
 )
 
 type Leaf struct {
     Raw       json.RawMessage
     HashBytes [32]byte
+    Format    string // "vdc" or "legacy"
+    EntryID   string // optional
 }
 
 type LogState struct {
@@ -31,11 +35,64 @@ type LogState struct {
     logID string
 }
 
-func (ls *LogState) append(raw json.RawMessage) (size int, root string, leafHash string) {
+var vdcMagic = []byte{0x89, 'v', 'd', 'c', 0x0d, 0x0a, 0x1a, 0x0a}
+
+// computeVdcLeafHash tries to parse a VDC blob and extract the SigBase from the first COSE_Sign1 receipt.
+// It returns (hash, true) on success. On failure, (zero, false).
+func computeVdcLeafHash(vdc []byte) ([32]byte, bool) {
+    var zero [32]byte
+    if len(vdc) < len(vdcMagic) || string(vdc[:len(vdcMagic)]) != string(vdcMagic) {
+        return zero, false
+    }
+    // Decode VDC CBOR body (top-level map). We only need key 4 (receipts: list of bstr COSE_Sign1).
+    var top map[int]any
+    if err := cbor.Unmarshal(vdc[len(vdcMagic):], &top); err != nil {
+        return zero, false
+    }
+    recVal, ok := top[4]
+    if !ok {
+        return zero, false
+    }
+    recList, ok := recVal.([]any)
+    if !ok || len(recList) == 0 {
+        return zero, false
+    }
+    rec0, ok := recList[0].([]byte)
+    if !ok || len(rec0) == 0 {
+        return zero, false
+    }
+    // COSE_Sign1 structure: [protected_bstr, unprotected_map, payload:bstr, signature:bstr]
+    var cose []any
+    if err := cbor.Unmarshal(rec0, &cose); err != nil {
+        return zero, false
+    }
+    if len(cose) != 4 {
+        return zero, false
+    }
+    payload, ok := cose[2].([]byte)
+    if !ok {
+        return zero, false
+    }
+    h := sha256.Sum256(payload)
+    return h, true
+}
+
+func (ls *LogState) append(raw json.RawMessage, format string, entryID string) (size int, root string, leafHash string) {
     ls.mu.Lock()
     defer ls.mu.Unlock()
-    h := sha256.Sum256(raw)
-    ls.leaves = append(ls.leaves, Leaf{Raw: raw, HashBytes: h})
+    // Prefer VDC SigBase hash if format=="vdc" and payload contains SigBase
+    var h [32]byte
+    if format == "vdc" {
+        if hv, ok := computeVdcLeafHash([]byte(raw)); ok {
+            h = hv
+        } else {
+            // Fallback to hashing raw bytes if parsing fails
+            h = sha256.Sum256([]byte(raw))
+        }
+    } else {
+        h = sha256.Sum256(raw)
+    }
+    ls.leaves = append(ls.leaves, Leaf{Raw: raw, HashBytes: h, Format: format, EntryID: entryID})
     size = len(ls.leaves)
     root = ls.computeRootLocked()
     leafHash = base64.StdEncoding.EncodeToString(h[:])
@@ -71,7 +128,13 @@ func (ls *LogState) rootSnapshot() (size int, root string) {
 }
 
 func (ls *LogState) verify(raw json.RawMessage) (present bool, leafHash string, size int, root string) {
-    h := sha256.Sum256(raw)
+    // If the input looks like a VDC, compute leaf hash over SigBase; otherwise over raw JSON bytes.
+    var h [32]byte
+    if hv, ok := computeVdcLeafHash([]byte(raw)); ok {
+        h = hv
+    } else {
+        h = sha256.Sum256(raw)
+    }
     leafHash = base64.StdEncoding.EncodeToString(h[:])
     ls.mu.RLock(); defer ls.mu.RUnlock()
     for _, l := range ls.leaves { if l.HashBytes == h { present = true; break } }
@@ -162,10 +225,26 @@ func main(){
     })
     mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request){
         defer r.Body.Close()
-        var raw json.RawMessage
-        if err := json.NewDecoder(r.Body).Decode(&raw); err != nil { http.Error(w, err.Error(), 400); return }
-        size, root, leaf := state.append(raw)
-        enc(w, map[string]any{"status":"ok","size":size,"root":root,"leaf_hash":leaf})
+        var body map[string]any
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, err.Error(), 400); return }
+        format, _ := body["format"].(string)
+        if format == "vdc" {
+            b64, _ := body["vdc_b64"].(string)
+            entryID, _ := body["entry_id"].(string)
+            bs, err := base64.StdEncoding.DecodeString(b64)
+            if err != nil { http.Error(w, err.Error(), 400); return }
+            // Store raw bytes as JSON string for MVP visibility
+            raw := json.RawMessage(bs)
+            size, root, leaf := state.append(raw, "vdc", entryID)
+            enc(w, map[string]any{"status":"ok","size":size,"root":root,"leaf_hash":leaf,"format":"vdc","entry_id":entryID})
+            return
+        }
+        // Legacy fallback: accept any JSON object
+        payload := body["payload"]
+        raw, err := json.Marshal(payload)
+        if err != nil { http.Error(w, err.Error(), 400); return }
+        size, root, leaf := state.append(raw, "legacy", "")
+        enc(w, map[string]any{"status":"ok","size":size,"root":root,"leaf_hash":leaf,"format":"legacy"})
     })
     mux.HandleFunc("/__evg/verify", func(w http.ResponseWriter, r *http.Request){
         defer r.Body.Close()
@@ -191,7 +270,13 @@ func main(){
             defer r.Body.Close()
             var body struct { Receipt json.RawMessage `json:"receipt"` }
             if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, err.Error(),400); return }
-            h := sha256.Sum256(body.Receipt)
+            // Compute leaf hash using VDC SigBase if applicable
+            var h [32]byte
+            if hv, ok := computeVdcLeafHash([]byte(body.Receipt)); ok {
+                h = hv
+            } else {
+                h = sha256.Sum256(body.Receipt)
+            }
             leaf := base64.StdEncoding.EncodeToString(h[:])
             state.mu.RLock()
             // linear scan to find index

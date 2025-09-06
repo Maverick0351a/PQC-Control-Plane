@@ -24,10 +24,24 @@ def bundle_compliance_pack(output_path: str, evg_url: Optional[str] = None, date
     """
     day_dir = _day_dir(date)
     receipts_path = os.path.join(day_dir, "receipts.jsonl")
+    # VDC-first: reference .vdc files for the date if any
+    vdc_files = []
+    try:
+        for name in sorted(os.listdir(day_dir)):
+            if name.endswith('.vdc'):
+                vdc_files.append(os.path.join(day_dir, name))
+    except Exception:
+        vdc_files = []
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         leaf_hashes = []
+        # Include VDCs first
+        for vf in vdc_files:
+            try:
+                zf.write(vf, arcname=os.path.basename(vf))
+            except Exception:
+                pass
         if os.path.exists(receipts_path):
             # copy receipts and gather leaf hashes
             with open(receipts_path, "r", encoding="utf-8") as f:

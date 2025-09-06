@@ -72,3 +72,13 @@ Prometheus metrics exposed by receipt sink (used for Grafana panels & alerting):
 - Differential privacy noise layer for exposure aggregates prior to external export.
 
 For full rationale, risk analysis tables, and operational playbooks see `THREAT_MODEL.md`.
+
+## Verifier Security Clarifications
+
+- DoS: Verifiers MUST stream payload verification; refuse embedded data over size thresholds; enforce external.length sanity.
+
+- Substitution: Digests bind content; URIs are advisory. A changed resource will fail digest check.
+
+- Privacy: Default to digests‑only; treat meta as potentially identifying; support pairwise or ephemeral DIDs for producer.
+
+- Key security: v0.1 RECOMMENDS HSM‑backed signing (PKCS#11 or cloud HSM); rotate keys; record COSE kid that resolves to a stable public key.

@@ -1,0 +1,58 @@
+; VDC v0.1 (sketch)
+
+vdc = {
+  1: tstr,                  ; version "v0.1"
+  2: meta,
+  3: [* payload_descriptor],
+  4: [* bstr],               ; receipts (COSE_Sign1)
+  5: [* anchor],             ; optional transparency anchors
+  6: [* timestamp]           ; optional RFC3161 timestamps
+}
+
+meta = {
+  1: tstr,                  ; purpose
+  2: tstr,                  ; producer
+  3: tstr,                  ; created (RFC3339)
+  4: crypto_context,
+  5: policies
+}
+
+crypto_context = {
+  1: tstr,                  ; protocol (e.g., "TLS1.3" | "offline")
+  2: tstr,                  ; suite (e.g., TLS cipher suite or label)
+  ?3: channel_binding
+}
+
+channel_binding = {
+  1: "tls-exporter",
+  2: "EXPORTER-Channel-Binding",
+  3: 32
+}
+
+policies = {
+  ? "profile": tstr,        ; "vdc-core" | "vdc-bound" | "vdc-anchored" | "vdc-timestamped"
+  ? "critical_top_level_keys": [* int]
+  * tstr => any
+}
+
+payload_descriptor = {
+  1: tstr,                  ; id
+  2: tstr,                  ; content-type
+  3: "sha-384" / "sha-256",
+  4: bstr,                  ; digest
+  ?5: bstr,                 ; embedded bytes
+  ?6: {1: tstr, 2: uint},   ; external {uri, length}
+  ?7: tstr                  ; role
+}
+
+anchor = {
+  1: "ct/v2",
+  2: bstr,                  ; entry_hash = sha256(SigBase)
+  3: {1: uint, 2: bstr},    ; proof {tree_size, audit_path}
+  4: {1: uint, 2: bstr, 3: bstr} ; sth {tree_size, root_hash, sth_signature}
+}
+
+timestamp = {
+  1: bstr,                  ; RFC3161 token (DER)
+  2: "sha-256" / "sha-384"  ; hash of SigBase covered by token
+}
